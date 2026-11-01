@@ -81,7 +81,7 @@ fn parse_one(text: &str) -> Option<Favorite> {
     None
 }
 
-fn is_shorthand(text: &str) -> bool {
+pub(crate) fn is_shorthand(text: &str) -> bool {
     let allowed = |part: &str| {
         !part.is_empty()
             && part

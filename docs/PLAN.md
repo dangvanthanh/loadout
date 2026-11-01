@@ -88,7 +88,7 @@ streaming and ANSI stripping. Missing `npx` → typed error.
 matching favorites higher; keep the ranking deterministic and tested.
 **Accept:** ranking tests show stack matches first, then context boosts, then others.
 
-### [ ] T1.6 Updates, diff, safety + compatibility (U3, U4)
+### [x] T1.6 Updates, diff, safety + compatibility (U3, U4) (2026-10-31)
 `updates.rs`, `diff.rs`, `safety.rs`. Tree SHA of the skill folder only. SKILL.md + file list diff. Heuristic safety
 scan plus simple compatibility notes.
 **Accept:** tests cover README-only (no update), real folder change (update), and several safety patterns.

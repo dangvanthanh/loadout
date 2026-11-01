@@ -2,11 +2,14 @@
 
 pub mod agents;
 pub mod context;
+pub mod diff;
 pub mod installer;
 pub mod model;
 pub mod parser;
 pub mod project;
+pub mod safety;
 pub mod stack;
 pub mod storage;
 pub mod tags;
 pub mod ui_skills;
+pub mod updates;

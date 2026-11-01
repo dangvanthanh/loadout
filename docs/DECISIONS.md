@@ -177,3 +177,18 @@ with no tags use `suggest_tags` (keyword table over name, skill, and source word
 rank well. `context::gather` takes the editor's open file, `git status --porcelain -uall`, and the 20 newest files
 from a bounded walk (depth 4, 3000 entries, skipping `node_modules`, `target`, …). Each path maps to
 testing / frontend / database / devops / docs / language tags. Every source is optional (DECISIONS 016).
+
+## 025 — Versions, diffs, and the safety scan
+**Choice:** `updates.rs` ports `UpdateChecker.swift`: the folder's tree SHA for a named skill or folder URL; a SHA-256
+over every skill folder's version for a whole-repo favorite; `HEAD` first, then the default branch. Two changes:
+a skill at the repo root hashes the root's files minus README / LICENSE / CHANGELOG / `.github`, because the root
+tree SHA moves on README edits; and a `blob/…/SKILL.md` link means its folder. Trees keep blob SHAs, so `diff.rs`
+can list added / removed / modified files between two listings of a folder (fetched at each version's tree SHA),
+plus a grouped SKILL.md line diff (`similar`). Blob text comes from the blobs API (base64).
+**Caveat for T3.2:** synthetic versions (whole repo, root skill) aren't fetchable tree SHAs. Diffing those needs
+the listing saved at install time.
+**Safety:** `safety::scan` is pure over `(path, text)` pairs. It flags scripts plus eight line rules (pipe to shell,
+sudo, deletes outside the project, encoded exec, credential reads, secrets sent over the network, `chmod 777`, prompt
+injection) and invisible characters, once per rule per file. Compatibility notes cover a missing SKILL.md or
+description, `allowed-tools`, `.claude/` paths, and Python/Node script runtimes. Informs only, never blocks.
+**Verified live:** `anthropics/skills` → 20 skills; `skills/pdf` version = its tree SHA; its scripts are flagged.
