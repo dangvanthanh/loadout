@@ -10,6 +10,7 @@ gpui-kit = "=0.8.1"
 anyhow = "1"
 global-hotkey = "0.9"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDictionary", "NSString", "NSValue"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSScreen", "NSGraphics", "NSWorkspace", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSDictionary", "NSError", "NSGeometry", "NSString", "NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSScreen", "NSGraphics", "NSWorkspace", "NSRunningApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSImage", "NSWindow"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 core-foundation = "0.10"

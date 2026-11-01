@@ -40,6 +40,11 @@ can run without launching the app.
 **Choice:** `tray.rs` creates an `NSStatusItem` and positions a GPUI popup under it.
 **Why:** GPUI has no tray API; community `gpui-tray` crates are early and must match GPUI Kit's exact GPUI flavor.
 **Revisit:** at T0.4, and whenever GPUI Kit adds tray support.
+**T0.4 result (2026-10-31):** kept our own. `gpui-tray` 0.3.0 exists but is young and doesn't expose the icon's frame,
+which we need to place the popup. `tray.rs` is ~90 lines: an `NSStatusItem` whose button target sets a flag that the
+50 ms hotkey poll drains. The popup is a `WindowKind::PopUp` panel centered under the icon frame (display-relative).
+A click that blurs the open popup is ignored for 400 ms so it doesn't reopen it. On macOS 27 the item is drawn by
+`MenuBarAgent`, but `button.window().frame()` still reports the icon's position.
 
 ## 009 — Menu bar only, no sandbox, plain JSON
 **Why:** A 3-second utility; sandboxing blocks `npx` in project folders; JSON is easy to back up, diff, and share.
@@ -118,3 +123,12 @@ remove the window; the app policy is `Accessory`. ⌘Q quits while the palette h
 **Why:** Like Spotlight, the panel takes keyboard focus without activating Loadout, so the previous app stays
 frontmost: focus returns by itself on close, and T0.3 can read the frontmost app without racing our own activation.
 The hotkey receiver is polled every 50 ms from a GPUI timer (no redraws).
+
+## 019 — Notifications through GPUI; SF Symbol menu bar icon
+**Choice:** Post notifications with GPUI's `cx.show_system_notification` (it wraps `UNUserNotificationCenter` and
+skips posting when unbundled). No `objc2-user-notifications` dependency; `macos/notify.rs` waits for the digest
+(T5.2). The menu bar icon is the SF Symbol `square.stack.3d.up` (filled variant for updates), like the prototype.
+**Why:** Same behavior with less code and no PNG assets to keep in sync; SF Symbols are template images that follow
+the menu bar's appearance.
+**Note:** the T0.4 popup holds only the spike controls (open at login, test notification, quit). M5 (T5.3) replaces
+it with the real popup.

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Loadout</string>
+    <key>CFBundleDisplayName</key>
+    <string>Loadout</string>
+    <key>CFBundleExecutable</key>
+    <string>Loadout</string>
+    <key>CFBundleIdentifier</key>
+    <string>local.loadout.app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <!-- Menu bar only: no Dock icon -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Loadout reads the folder of the front Finder window so it can install skills into the project you're in.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>local.loadout.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>loadout</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

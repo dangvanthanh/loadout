@@ -62,7 +62,7 @@ GPUI Kit `IconName` where available; otherwise Lucide-style SVGs in `assets/icon
 | Refresh, settings, remove | rotate-cw, settings, x |
 
 **Menu bar icon:** monochrome template image, a simple "backpack/layers" glyph; outline normally, filled when any
-project has an update. 18×18 pt, @1x and @2x in `assets/tray/`.
+project has an update. SF Symbols `square.stack.3d.up` / `square.stack.3d.up.fill` (template by default, as in the prototype).
 
 ## Row states
 

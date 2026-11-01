@@ -59,10 +59,10 @@ Who it's for: developers who use coding agents (Pi, Claude Code, Cursor, Codex, 
 Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built under the old name SkillDock).
 
 ### M0 — Foundation
-- ⬜ GPUI + GPUI Kit app, menu bar icon, popup under the icon, no Dock icon
+- ✅ GPUI + GPUI Kit app, menu bar icon, popup under the icon, no Dock icon
 - ✅ Global hotkey ⌃⌥L opens a palette window
 - ✅ Frontmost Finder/editor folder detection (spike for U1)
-- ⬜ App bundle, notifications, open at login
+- ✅ App bundle, notifications, open at login
 
 ### M1 — Core library (no UI, fully tested)
 - ⬜ Model + storage, paste parser, installer, update checker

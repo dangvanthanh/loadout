@@ -1,6 +1,7 @@
 mod hotkey;
 mod macos;
 mod state;
+mod tray;
 mod views;
 mod windows;
 
@@ -12,7 +13,7 @@ use gpui_kit::*;
 
 actions!(loadout, [Quit]);
 
-/// How often the hotkey receiver is drained; cheap and never redraws.
+/// How often hotkey and menu bar clicks are drained; cheap and never redraws.
 const HOTKEY_POLL: Duration = Duration::from_millis(50);
 
 fn main() {
@@ -24,16 +25,22 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         views::palette::init(cx);
-        let state = cx.new(|_| state::AppState::default());
+        views::popup::init(cx);
+        let state = cx.new(|_| state::AppState::new());
         cx.set_global(state::GlobalAppState(state));
 
-        // Startup invariant: without the hotkey the palette is unreachable.
+        // Startup invariants: without the menu bar item and hotkey, Loadout is unreachable.
+        let mtm = objc2::MainThreadMarker::new().expect("main thread");
+        cx.set_global(tray::Tray::new(mtm).expect("create menu bar item"));
         let hotkey = hotkey::Hotkey::register(hotkey::DEFAULT).expect("register global hotkey");
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor().timer(HOTKEY_POLL).await;
                 if hotkey.pressed() {
                     cx.update(windows::toggle_palette);
+                }
+                if tray::take_click() {
+                    cx.update(windows::toggle_popup);
                 }
             }
         })

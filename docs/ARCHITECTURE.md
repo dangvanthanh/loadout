@@ -92,11 +92,11 @@ loadout/
         settings.rs
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
-        notify.rs                 UNUserNotificationCenter + digest scheduling
+        notify.rs                 digest scheduling (T5.2); posting uses GPUI's show_system_notification
         login_item.rs             SMAppService
         url_scheme.rs             loadout:// and .loadout.json open events
         launch.rs                 open agent via URL scheme / CLI
-    loadout/assets/           icons/, tray/ (template PNGs)
+    loadout/assets/           icons/ (only if GPUI Kit's set lacks one; tray uses SF Symbols)
   packaging/
     Info.plist                    LSUIElement, CFBundleURLTypes (loadout), NSAppleEventsUsageDescription
     bundle.sh                     release build → Loadout.app (+ --install, --universal, --release)
@@ -115,7 +115,7 @@ don't add a separate `gpui` line unless GPUI Kit's docs say so.
 | `gpui-kit` | app | Components, theme, `Root`; brings the matching GPUI |
 | `objc2`, `objc2-foundation`, `objc2-app-kit` | app | Tray, activation policy, `NSWorkspace` frontmost app, `NSAppleScript` |
 | Accessibility FFI (`accessibility-sys` or a small `extern "C"` block + `core-foundation`) | app | `AXDocument` of the focused window — decide in T0.3 |
-| `objc2-user-notifications`, `objc2-service-management` | app | Notifications, open at login |
+| `objc2-service-management` | app | Open at login (notifications come from GPUI itself, DECISIONS 019) |
 | `global-hotkey` | app | ⌃⌥L |
 | `security-framework` | app | GitHub token in Keychain (M5) |
 | `serde`, `serde_json`, `uuid` | core | Data, GitHub responses |

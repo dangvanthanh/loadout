@@ -47,7 +47,7 @@ to the previous app.
 - Record which apps work in `DECISIONS.md` (entry 012). Unsupported apps fall back to the last-used project.
 **Accept:** with Finder, Zed, and VS Code each in front, the palette's "Into" line shows the right folder.
 
-### [ ] T0.4 Menu bar item, bundle, notifications, login item
+### [x] T0.4 Menu bar item, bundle, notifications, login item (2026-10-31)
 - `tray.rs`: `NSStatusItem` with a template icon (objc2). Click toggles a 340 pt popup window under the icon; closes on blur.
   Check first whether a maintained GPUI tray crate matches GPUI Kit's GPUI version (DECISIONS 008).
 - `packaging/Info.plist` (bundle id `local.loadout.app`, `LSUIElement`, `CFBundleURLTypes` for `loadout`,
