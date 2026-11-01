@@ -141,3 +141,10 @@ use. With no `Loadout/data.json` yet, `storage::load` reads `SkillDock/data.json
 own file and leaves the prototype's alone. A file that doesn't parse is renamed `data.json.corrupt-<secs>` and
 Loadout starts empty, so nothing is overwritten.
 **Agents:** `agents.rs` copies 18 common agents' skill folders from `skills` 1.7.4. Unknown ids still pass to `-a`.
+
+## 021 — Parser port: two fixes over the prototype
+**Choice:** `parser.rs` follows `SourceParser.swift` case for case, with two fixes. `.git` is stripped only as a
+suffix (Swift removed it anywhere, so `acme/my.github-tools` lost letters). ui-skills scraping matches
+`npx skills add [^<\n"]+` on the raw HTML and decodes entities per match: the live page carries the command in a
+`data-command-row="…"` attribute, where the old pattern ran past the closing quote into the tag. The fixture is a
+trimmed excerpt of the real page (2026-10-31). URLs are split by hand; no `url` crate.

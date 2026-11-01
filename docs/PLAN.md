@@ -68,7 +68,7 @@ Tests: `{}`, a prototype `data.json` fixture (imported from `~/Library/Applicati
 round-trip, corrupt file.
 **Accept:** `cargo test -p loadout-core storage` green.
 
-### [ ] T1.2 Paste parser
+### [x] T1.2 Paste parser (2026-10-31)
 `parser.rs` + `ui_skills.rs` (port `SourceParser.swift`). At least 15 cases: owner/repo, `@skill`, GitHub repo/tree/`.git`
 URLs, gitlab, skills.sh repo/skill/site and reserved paths, `npx skills add` with quoted names and multiple `--skill`,
 ui-skills from a saved HTML fixture.

@@ -2,5 +2,7 @@
 
 pub mod agents;
 pub mod model;
+pub mod parser;
 pub mod project;
 pub mod storage;
+pub mod ui_skills;
