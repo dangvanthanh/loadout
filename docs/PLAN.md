@@ -134,7 +134,7 @@ Background check, Update pill, filled menu bar icon, notification when real upda
 Show file list + SKILL.md diff before updating. Pin version or ignore this update.
 **Accept:** user can see the diff, pin, and ignore; behavior is persisted.
 
-### [ ] T3.3 Safety + compatibility glance + preview
+### [x] T3.3 Safety + compatibility glance + preview (2026-11-01)
 On first install of a skill, show findings. Preview skill content.
 **Accept:** a skill with a `curl | sh` pattern shows a warning; install is still allowed.
 

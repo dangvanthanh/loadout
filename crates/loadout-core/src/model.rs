@@ -228,6 +228,17 @@ impl SavedState {
         })
     }
 
+    /// Whether Loadout ever installed this skill anywhere (records or provenance): a first
+    /// install gets a safety glance.
+    pub fn ever_installed(&self, favorite: Uuid) -> bool {
+        self.installs().any(|(_, id, _)| id == favorite)
+            || self
+                .favorites
+                .iter()
+                .find(|f| f.id == favorite)
+                .is_some_and(|f| !crate::provenance::for_skill(&self.provenance, f).is_empty())
+    }
+
     /// Favorites with at least one install whose version is known: the ones worth checking.
     pub fn tracked_favorites(&self) -> Vec<Favorite> {
         self.favorites
@@ -396,6 +407,26 @@ mod tests {
         state.mark_installed(Some(shop), pdf, None); // unknown version: never an update
         state.mark_installed(Some(shop), tdd, Some("same"));
         (state, fd, pdf, tdd, shop)
+    }
+
+    #[test]
+    fn ever_installed_uses_records_and_provenance() {
+        let mut state = SavedState::default();
+        state.add_favorites(parse(
+            "npx skills add anthropics/skills --skill pdf --skill frontend-design",
+        ));
+        let (pdf, fd) = (state.favorites[0].id, state.favorites[1].id);
+        assert!(!state.ever_installed(pdf));
+        state.mark_installed(None, pdf, None);
+        assert!(state.ever_installed(pdf));
+        // Removed from every project since, but the log remembers.
+        let favorite = state.favorites[1].clone();
+        crate::provenance::append(
+            &mut state,
+            crate::provenance::entry("install", None, &favorite),
+        );
+        assert!(state.ever_installed(fd));
+        assert!(!state.ever_installed(Uuid::new_v4()));
     }
 
     #[test]

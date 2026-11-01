@@ -291,3 +291,18 @@ version only; a newer one surfaces again. Both persist in `skillState` keyed by 
 removing and re-adding the favorite. Pinned rows show a muted pin. Esc leaves the view before it closes the popup.
 **Verified:** with `frontend-design` recorded at an older tree SHA, the view listed SKILL.md as modified with its
 real diff. Pin, unpin, and ignore changed the pending set as expected, and `ignoredVersion` was written to disk.
+
+## 036 — Safety glance and preview
+**Choice:** A first install is a GitHub skill Loadout never installed anywhere (no `installed` record, no provenance
+entry) that isn't already in the target. Before Return installs one, its folder is scanned: one trees request per
+repo (reusing the update check's listing) plus up to 25 text files from `raw.githubusercontent.com`, which doesn't
+count against the 60/hour API limit. Scans are cached for the session and prefetched for pre-selected first
+installs, so Return is usually instant. If any first install has findings, the palette shows one warning line above
+the footer ("pdf includes scripts (…)") with Review, and the footer says "↩ Install anyway". Return again on the same
+selection installs. A scan that fails counts as no findings: the glance informs and never blocks. Flagged rows show
+a shield with the findings as a tooltip. Clicking a name, or ⌘Y on the highlighted row, previews it in the list
+area: findings, compatibility notes, files, and SKILL.md. Esc or ⌘Y closes the preview before Esc closes the
+palette. The palette list is now 4–7 rows high so a preview fits.
+**Verified:** a real first install of `anthropics/skills@pdf` showed "Checking the skill…", then the scripts notice;
+Return again installed it, and it no longer counts as a first install. `curl … | sh` detection is covered by core
+tests; no public skill I checked uses it.

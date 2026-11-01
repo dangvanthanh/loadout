@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use gpui_kit::*;
@@ -9,6 +9,7 @@ use loadout_core::diff::{self, Changes};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
 use loadout_core::model::{Added, Favorite, Pending, SavedState, Uuid};
+use loadout_core::safety::{self, Report};
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
 use loadout_core::{agents, parser, project, provenance, storage, tags, ui_skills};
@@ -67,6 +68,13 @@ pub struct AppState {
     pub check_error: Option<SharedString>,
     /// What changed in the update the popup is showing.
     pub what_changed: Option<WhatChanged>,
+    /// Files + safety findings per favorite, for first-install glances and previews (session).
+    pub scans: HashMap<Uuid, Scan>,
+    /// Shown in the palette when a first install has findings; Return again installs anyway.
+    pub safety_notice: Option<SafetyNotice>,
+    /// An equip waiting for its scans; it runs (or shows the notice) when they land.
+    awaiting: Option<Vec<Uuid>>,
+    _scans: Vec<Task<()>>,
     _detect: Option<Task<()>>,
     _changes: Option<Task<()>>,
     _resolve: Option<Task<()>>,
@@ -75,6 +83,28 @@ pub struct AppState {
 }
 
 const LOG_LINES: usize = 2000;
+
+pub enum Scan {
+    Loading,
+    Ready(Arc<SkillScan>),
+    /// Why there's no preview, phrased for the user.
+    Unavailable(SharedString),
+}
+
+/// A skill folder as fetched from GitHub's default branch.
+pub struct SkillScan {
+    /// (path inside the skill folder, text); SKILL.md first.
+    pub files: Vec<(String, String)>,
+    pub report: Report,
+}
+
+pub struct SafetyNotice {
+    /// The equip it holds back.
+    pub ids: Vec<Uuid>,
+    /// The first flagged skill, for "Review".
+    pub favorite: Uuid,
+    pub text: SharedString,
+}
 
 /// One pending update's changes, for the popup.
 pub struct WhatChanged {
@@ -162,6 +192,10 @@ impl AppState {
             last_checked: None,
             check_error: None,
             what_changed: None,
+            scans: HashMap::new(),
+            safety_notice: None,
+            awaiting: None,
+            _scans: Vec::new(),
             _detect: None,
             _changes: None,
             _resolve: None,
@@ -263,6 +297,9 @@ impl AppState {
         if self.installing || ids.is_empty() {
             return;
         }
+        // Return on a notice for the same selection: install anyway.
+        let anyway = self.safety_notice.take().is_some_and(|n| n.ids == ids);
+        self.awaiting = None;
         // The Into line may still show the fallback project; never install there by accident.
         if self.target.detecting {
             self.install_status = Some("Finding the project…".into());
@@ -312,7 +349,126 @@ impl AppState {
             cx.notify();
             return;
         }
+        if !anyway && self.hold_for_safety(ids, &jobs, cx) {
+            return;
+        }
         self.run_jobs(jobs, Some(place), cx);
+    }
+
+    /// First installs get a glance before running (U4): waits for their scans, then shows a
+    /// notice if any has findings. True when the equip is held back. Never blocks for good:
+    /// a scan that fails counts as no findings, and Return on the notice installs anyway.
+    fn hold_for_safety(&mut self, ids: &[Uuid], jobs: &[Job], cx: &mut Context<Self>) -> bool {
+        let first: Vec<Uuid> = jobs
+            .iter()
+            .filter(|j| j.kind == JobKind::Install && self.needs_glance(j.favorite.id))
+            .map(|j| j.favorite.id)
+            .collect();
+        self.ensure_scans(&first, cx);
+        let loading = first
+            .iter()
+            .filter(|id| matches!(self.scans.get(id), Some(Scan::Loading)))
+            .count();
+        if loading > 0 {
+            self.awaiting = Some(ids.to_vec());
+            self.install_status = Some(match loading {
+                1 => "Checking the skill…".into(),
+                n => format!("Checking {n} skills…").into(),
+            });
+            cx.notify();
+            return true;
+        }
+        let flagged: Vec<(Uuid, String)> = first
+            .iter()
+            .filter_map(|id| match self.scans.get(id) {
+                Some(Scan::Ready(scan)) => Some((*id, scan.report.summary()?)),
+                _ => None,
+            })
+            .collect();
+        let Some((favorite, summary)) = flagged.first() else {
+            return false;
+        };
+        let mut text = format!("{} {summary}.", self.favorite_name(*favorite));
+        match flagged.len() {
+            1 => {}
+            2 => text += " 1 more skill has findings.",
+            n => text += &format!(" {} more skills have findings.", n - 1),
+        }
+        self.safety_notice = Some(SafetyNotice {
+            ids: ids.to_vec(),
+            favorite: *favorite,
+            text: text.into(),
+        });
+        self.install_status = None;
+        cx.notify();
+        true
+    }
+
+    /// A skill Loadout never installed anywhere, from GitHub (others can't be read).
+    pub fn needs_glance(&self, favorite: Uuid) -> bool {
+        !self.data.ever_installed(favorite)
+            && !self.is_installed_here(favorite)
+            && self
+                .data
+                .favorites
+                .iter()
+                .find(|f| f.id == favorite)
+                .and_then(updates::skill_ref)
+                .is_some()
+    }
+
+    /// Fetches and scans the skills in `ids` not scanned yet this session (off the main thread):
+    /// one listing per repo (reusing the update check's) and raw files, which cost no API quota.
+    pub fn ensure_scans(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
+        let todo: Vec<Favorite> = self
+            .data
+            .favorites
+            .iter()
+            .filter(|f| ids.contains(&f.id) && !self.scans.contains_key(&f.id))
+            .cloned()
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        let mut trees = HashMap::new();
+        for favorite in &todo {
+            match updates::skill_ref(favorite) {
+                Some(skill_ref) => {
+                    if let Some(tree) = self.trees.get(&skill_ref.repo) {
+                        trees.insert(skill_ref.repo, tree.clone());
+                    }
+                    self.scans.insert(favorite.id, Scan::Loading);
+                }
+                None => {
+                    self.scans.insert(
+                        favorite.id,
+                        Scan::Unavailable("Preview needs a GitHub source.".into()),
+                    );
+                }
+            }
+        }
+        let task = cx
+            .background_executor()
+            .spawn(async move { scan_skills(todo, trees) });
+        self._scans.push(cx.spawn(async move |this, cx| {
+            let (results, trees) = task.await;
+            this.update(cx, |this, cx| {
+                for (id, scan) in results {
+                    this.scans.insert(id, scan);
+                }
+                this.trees.extend(trees);
+                let ready = this.awaiting.as_ref().is_some_and(|ids| {
+                    !ids.iter()
+                        .any(|id| matches!(this.scans.get(id), Some(Scan::Loading)))
+                });
+                if ready && let Some(ids) = this.awaiting.take() {
+                    this.equip(&ids, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
     }
 
     /// Updates every pending install of `only` (or of every skill), in each project it's in.
@@ -716,6 +872,9 @@ impl AppState {
     /// Resolves the target for `app` off the main thread; the last project stands in meanwhile.
     pub fn detect_target(&mut self, app: Option<FrontApp>, cx: &mut Context<Self>) {
         let fallback = self.last_project();
+        // A new palette starts without the last one's notice or waiting equip.
+        self.safety_notice = None;
+        self.awaiting = None;
         if !self.installing {
             self.install_status = None;
         }
@@ -919,6 +1078,66 @@ impl AppState {
     pub fn stack_summary(&self) -> String {
         stack::summary(&self.target.stack, 2)
     }
+}
+
+/// Lists each skill's folder (fetching listings `trees` lacks) and reads its text files.
+/// Returns a result per favorite, plus listings fetched along the way.
+fn scan_skills(
+    favorites: Vec<Favorite>,
+    mut trees: HashMap<Repo, Tree>,
+) -> (Vec<(Uuid, Scan)>, HashMap<Repo, Tree>) {
+    let unavailable = |why: &str| Scan::Unavailable(why.to_string().into());
+    let mut results = Vec::new();
+    for favorite in favorites {
+        let Some(skill_ref) = updates::skill_ref(&favorite) else {
+            continue;
+        };
+        let repo = skill_ref.repo.clone();
+        if !trees.contains_key(&repo) {
+            match updates::fetch_tree(&repo, None) {
+                Ok(tree) => {
+                    trees.insert(repo.clone(), tree);
+                }
+                Err(err) => {
+                    let why = match err {
+                        updates::UpdateError::RateLimited => err.to_string(),
+                        _ => "Couldn't load the skill. Check your connection.".into(),
+                    };
+                    results.push((favorite.id, unavailable(&why)));
+                    continue;
+                }
+            }
+        }
+        let tree = &trees[&repo];
+        let Some(dir) = updates::skill_dir(&favorite, &skill_ref, tree).map(str::to_string) else {
+            results.push((
+                favorite.id,
+                unavailable("Couldn't find this skill in its repo."),
+            ));
+            continue;
+        };
+        let files: Vec<(String, String)> = updates::skill_files(tree, &dir)
+            .into_iter()
+            .filter_map(|path| {
+                let full = if dir.is_empty() {
+                    path.clone()
+                } else {
+                    format!("{dir}/{path}")
+                };
+                updates::fetch_raw(&repo, &full)
+                    .ok()
+                    .map(|text| (path, text))
+            })
+            .collect();
+        let scan = if files.is_empty() {
+            unavailable("Couldn't load the skill. Check your connection.")
+        } else {
+            let report = safety::scan(&files);
+            Scan::Ready(Arc::new(SkillScan { files, report }))
+        };
+        results.push((favorite.id, scan));
+    }
+    (results, trees)
 }
 
 fn project_name(root: &std::path::Path) -> String {

@@ -110,6 +110,64 @@ pub fn is_tree_sha(version: &str) -> bool {
     version.len() == 40 && version.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Most files a preview or safety scan reads from one skill.
+pub const MAX_SKILL_FILES: usize = 25;
+
+/// Extensions never worth reading as text.
+const BINARY: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "ico", "icns", "pdf", "zip", "gz", "tgz", "woff", "woff2",
+    "ttf", "otf", "mp3", "mp4", "mov", "wasm", "so", "dylib", "dll", "exe", "bin", "jar",
+];
+
+/// Text files in the skill folder `dir` of `tree`, relative to it: SKILL.md first, then by path,
+/// at most `MAX_SKILL_FILES`. For a root skill (`dir` = ""), repo files (README, LICENSE,
+/// CHANGELOG, `.github/`) are left out, as for its version.
+pub fn skill_files(tree: &Tree, dir: &str) -> Vec<String> {
+    let prefix = if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{dir}/")
+    };
+    let mut files: Vec<String> = tree
+        .blobs
+        .keys()
+        .filter_map(|path| path.strip_prefix(&prefix))
+        .filter(|path| !(dir.is_empty() && is_repo_level(path)))
+        .filter(|path| {
+            let ext = path.rsplit_once('.').map_or("", |(_, ext)| ext);
+            !BINARY.contains(&ext.to_ascii_lowercase().as_str())
+        })
+        .map(str::to_string)
+        .collect();
+    files.sort_by(|a, b| (a != "SKILL.md").cmp(&(b != "SKILL.md")).then(a.cmp(b)));
+    files.truncate(MAX_SKILL_FILES);
+    files
+}
+
+/// A file's text at the default branch from raw.githubusercontent.com, which doesn't count
+/// against the API rate limit (blocking). Files over 512 KB fail.
+pub fn fetch_raw(repo: &Repo, path: &str) -> Result<String, UpdateError> {
+    let url = format!(
+        "https://raw.githubusercontent.com/{}/{}/HEAD/{path}",
+        repo.owner, repo.name
+    );
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .into();
+    match agent.get(&url).header("User-Agent", "Loadout").call() {
+        Ok(mut response) => response
+            .body_mut()
+            .with_config()
+            .limit(512 * 1024)
+            .read_to_string()
+            .map_err(|e| UpdateError::Http(e.to_string())),
+        Err(ureq::Error::StatusCode(404)) => Err(UpdateError::NotFound),
+        Err(ureq::Error::StatusCode(429)) => Err(UpdateError::RateLimited),
+        Err(err) => Err(UpdateError::Http(err.to_string())),
+    }
+}
+
 /// The favorite's version right now, fetching its repo's listing unless `trees` has it
 /// (blocking). For recording what an install or update just fetched.
 pub fn version_now(
@@ -227,22 +285,24 @@ fn folder_version(tree: &Tree, dir: &str) -> Option<String> {
     if !dir.is_empty() {
         return tree.dirs.get(dir).cloned();
     }
-    let repo_level = |path: &str| {
-        let upper = path.to_ascii_uppercase();
-        path.starts_with(".github/")
-            || (!path.contains('/')
-                && ["README", "LICENSE", "CHANGELOG"]
-                    .iter()
-                    .any(|p| upper.starts_with(p)))
-    };
     let mut files: Vec<String> = tree
         .blobs
         .iter()
-        .filter(|(path, _)| !repo_level(path))
+        .filter(|(path, _)| !is_repo_level(path))
         .map(|(path, sha)| format!("{path}:{sha}"))
         .collect();
     files.sort();
     Some(sha256_hex(&files.join(",")))
+}
+
+/// Files that belong to the repo, not to a skill at its root.
+fn is_repo_level(path: &str) -> bool {
+    let upper = path.to_ascii_uppercase();
+    path.starts_with(".github/")
+        || (!path.contains('/')
+            && ["README", "LICENSE", "CHANGELOG"]
+                .iter()
+                .any(|p| upper.starts_with(p)))
 }
 
 fn sha256_hex(text: &str) -> String {
@@ -379,6 +439,35 @@ mod tests {
             owner: owner.into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn skill_files_are_text_and_skill_md_first() {
+        let t = tree("before");
+        assert_eq!(
+            skill_files(&t, "skills/pdf"),
+            ["SKILL.md", "scripts/fill.py"]
+        );
+        assert_eq!(
+            skill_files(&t, "skills/frontend-design"),
+            ["SKILL.md", "LICENSE.txt"]
+        );
+        assert!(skill_files(&t, "skills/missing").is_empty());
+
+        let mut root = tree("single-skill-repo");
+        root.blobs.insert("logo.png".into(), "x".into());
+        root.blobs
+            .insert(".github/workflows/ci.yml".into(), "x".into());
+        root.blobs.insert("scripts/run.sh".into(), "x".into());
+        assert_eq!(skill_files(&root, ""), ["SKILL.md", "scripts/run.sh"]);
+
+        let mut many = Tree::default();
+        for i in 0..40 {
+            many.blobs.insert(format!("s/ref{i:02}.md"), "x".into());
+        }
+        let files = skill_files(&many, "s");
+        assert_eq!(files.len(), MAX_SKILL_FILES);
+        assert_eq!(files[0], "ref00.md");
     }
 
     #[test]

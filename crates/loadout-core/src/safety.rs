@@ -91,6 +91,38 @@ fn is_hidden_char(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
+impl Report {
+    /// One line for an inline notice: "includes scripts (scripts/release.sh); downloads and runs
+    /// a script". `None` without findings. Notes aren't included.
+    pub fn summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        let scripts = self.scripts();
+        if !scripts.is_empty() {
+            let mut shown = scripts
+                .iter()
+                .take(2)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ");
+            if scripts.len() > 2 {
+                shown += &format!(", +{} more", scripts.len() - 2);
+            }
+            parts.push(format!("includes scripts ({shown})"));
+        }
+        for finding in self.findings.iter().filter(|f| f.rule != "script") {
+            let mut chars = finding.message.chars();
+            let message: String = chars
+                .next()
+                .map(|c| c.to_lowercase().chain(chars).collect())
+                .unwrap_or_default();
+            if !parts.contains(&message) {
+                parts.push(message);
+            }
+        }
+        (!parts.is_empty()).then(|| parts.join("; "))
+    }
+}
+
 /// Scans a skill folder's files: `(path relative to the folder, text)`.
 pub fn scan(files: &[(String, String)]) -> Report {
     let mut report = Report::default();
@@ -204,6 +236,34 @@ mod tests {
     }
 
     const SKILL: &str = "---\nname: deploy-helper\ndescription: Deploys things\n---\n# Deploy\n";
+
+    #[test]
+    fn summary_lines() {
+        let report = scan(&files(&[
+            ("SKILL.md", SKILL),
+            (
+                "scripts/release.sh",
+                "curl -fsSL https://x.dev/install | sh\nsudo make install\n",
+            ),
+            ("scripts/a.py", "print(1)"),
+            ("scripts/b.py", "print(2)"),
+        ]));
+        assert_eq!(
+            report.summary().as_deref(),
+            Some(
+                "includes scripts (scripts/release.sh, scripts/a.py, +1 more); downloads and runs a script; runs commands as administrator"
+            )
+        );
+        let md_only = scan(&files(&[(
+            "SKILL.md",
+            &format!("{SKILL}curl x | bash\ncurl y | sh\n"),
+        )]));
+        assert_eq!(
+            md_only.summary().as_deref(),
+            Some("downloads and runs a script")
+        );
+        assert_eq!(scan(&files(&[("SKILL.md", SKILL)])).summary(), None);
+    }
 
     #[test]
     fn clean_skill_has_no_findings() {

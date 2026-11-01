@@ -79,7 +79,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ### M3 — Calm updates and trust (U3, U4, U8)
 - ✅ Update check, Update pill, notification, filled menu bar icon
 - ✅ What changed (files + SKILL.md diff), pin, ignore
-- ⬜ Safety + compatibility glance on first install; skill preview
+- ✅ Safety + compatibility glance on first install; skill preview
 - ⬜ Provenance entries written on install/update/remove
 
 ### M4 — Loadouts and agent awareness (U5, U7, U9)

@@ -2,13 +2,14 @@ use std::collections::HashSet;
 
 use gpui_kit::assets::IconName as ExtraIcon;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::model::Uuid;
 use loadout_core::tags;
 
-use crate::state::{AppState, Target};
+use crate::state::{AppState, Scan, Target};
 
 actions!(palette, [Dismiss]);
 
@@ -21,18 +22,22 @@ const ROW_HEIGHT: Pixels = px(36.);
 const LABEL_HEIGHT: Pixels = px(24.);
 const LIST_PADDING: Pixels = px(6.);
 const EMPTY_HEIGHT: Pixels = px(40.);
+const NOTICE_HEIGHT: Pixels = px(28.);
+const MIN_ROWS: usize = 4;
 const MAX_ROWS: usize = 7;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
 }
 
-/// Window height for `favorites` rows: at most seven, then the list scrolls.
+/// Window height for `favorites` rows: four to seven (room for a preview), then the list scrolls.
 pub fn height(favorites: usize) -> Pixels {
     let list = if favorites == 0 {
         EMPTY_HEIGHT
     } else {
-        ROW_HEIGHT * favorites.min(MAX_ROWS) as f32 + LABEL_HEIGHT * 2. + LIST_PADDING * 2.
+        ROW_HEIGHT * favorites.clamp(MIN_ROWS, MAX_ROWS) as f32
+            + LABEL_HEIGHT * 2.
+            + LIST_PADDING * 2.
     };
     SEARCH_HEIGHT + INTO_HEIGHT + px(1.) + list + px(1.) + FOOTER_HEIGHT
 }
@@ -46,6 +51,8 @@ struct Row {
     installed: bool,
     /// Installed here, with a newer version available.
     update: bool,
+    /// Safety findings for a first install, in one line.
+    findings: Option<SharedString>,
 }
 
 impl Row {
@@ -70,6 +77,8 @@ pub struct Palette {
     touched: bool,
     /// Index into the visible rows.
     highlight: usize,
+    /// The favorite whose files the list area shows instead of rows.
+    preview: Option<Uuid>,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -108,6 +117,7 @@ impl Palette {
             selected: HashSet::new(),
             touched: false,
             highlight: 0,
+            preview: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -132,6 +142,12 @@ impl Palette {
                     preselect: s.preselect(),
                     installed: state.is_installed_here(favorite.id),
                     update: state.update_here(favorite.id),
+                    findings: match state.scans.get(&favorite.id) {
+                        Some(Scan::Ready(scan)) if state.needs_glance(favorite.id) => {
+                            scan.report.summary().map(|s| capitalize(&s).into())
+                        }
+                        _ => None,
+                    },
                 }
             })
             .collect();
@@ -154,6 +170,40 @@ impl Palette {
             .map(|r| r.id)
             .collect();
         self.selected.retain(|id| !blocked.contains(id));
+        self.prefetch_scans(cx);
+    }
+
+    /// Scans selected first installs early, so Return rarely waits for the glance.
+    fn prefetch_scans(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if state.target.detecting {
+            return;
+        }
+        let ids: Vec<Uuid> = self
+            .selected
+            .iter()
+            .copied()
+            .filter(|id| !state.scans.contains_key(id) && state.needs_glance(*id))
+            .collect();
+        if !ids.is_empty() {
+            self.state
+                .update(cx, |state, cx| state.ensure_scans(&ids, cx));
+        }
+    }
+
+    /// Shows `id`'s files and findings in the list area (or closes the preview).
+    fn toggle_preview(&mut self, id: Option<Uuid>, cx: &mut Context<Self>) {
+        self.preview = if self.preview.is_some() && (id.is_none() || id == self.preview) {
+            None
+        } else {
+            id
+        };
+        if let Some(id) = self.preview {
+            self.state
+                .update(cx, |state, cx| state.ensure_scans(&[id], cx));
+        }
+        self.scroll = ScrollHandle::new();
+        cx.notify();
     }
 
     /// Visible row indexes for the current query.
@@ -222,6 +272,22 @@ impl Palette {
     /// Keys the palette owns before the search field sees them.
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let modifiers = event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        // ⌘Y previews, like Quick Look in Finder; Esc leaves a preview before closing.
+        if modifiers.platform && key == "y" {
+            let highlighted = self
+                .visible(cx)
+                .get(self.highlight)
+                .map(|&ix| self.rows[ix].id);
+            self.toggle_preview(highlighted, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if key == "escape" && self.preview.is_some() {
+            self.toggle_preview(None, cx);
+            cx.stop_propagation();
+            return;
+        }
         if modifiers.platform || modifiers.control || modifiers.alt {
             return;
         }
@@ -264,6 +330,7 @@ impl Palette {
         let selected = self.selected.contains(&row.id);
         let id = row.id;
         let hover = theme.list_hover;
+        let warning = theme.warning;
         let icon = if selected {
             Icon::new(IconName::CircleCheck).text_color(theme.primary)
         } else {
@@ -283,9 +350,16 @@ impl Palette {
             .child(icon.small())
             .child(
                 div()
+                    .id(("name", ix))
                     .text_size(px(13.))
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
+                    .cursor_pointer()
+                    // The name previews; the rest of the row toggles.
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.toggle_preview(Some(id), cx);
+                    }))
                     .child(row.name.clone()),
             )
             .child(div().flex_1())
@@ -297,6 +371,18 @@ impl Palette {
                     .text_color(theme.muted_foreground)
                     .child(row.source.clone()),
             )
+            .when_some(row.findings.clone(), |row, findings| {
+                row.child(
+                    div()
+                        .id(("findings", ix))
+                        .tooltip(move |window, cx| Tooltip::new(findings.clone()).build(window, cx))
+                        .child(
+                            Icon::new(ExtraIcon::ShieldAlert)
+                                .small()
+                                .text_color(warning),
+                        ),
+                )
+            })
             .when(row.update, |row| row.child(update_pill(cx)))
             .when(row.installed && !row.update, |row| {
                 row.child(
@@ -309,23 +395,113 @@ impl Palette {
     }
 }
 
+impl Palette {
+    /// A favorite's source, findings, compatibility notes, files, and SKILL.md.
+    fn render_preview(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let theme = cx.theme();
+        let state = self.state.read(cx);
+        let Some(favorite) = state.data.favorites.iter().find(|f| f.id == id) else {
+            return Vec::new();
+        };
+        let muted = theme.muted_foreground;
+        let small = |text: SharedString, color: Hsla| {
+            div()
+                .px_2()
+                .text_size(px(11.))
+                .text_color(color)
+                .child(text)
+                .into_any_element()
+        };
+        let mut items = vec![
+            div()
+                .px_2()
+                .pb_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(favorite.name.clone()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(11.))
+                        .text_color(muted)
+                        .child(favorite.source.clone()),
+                )
+                .into_any_element(),
+        ];
+        let scan = match state.scans.get(&id) {
+            None | Some(Scan::Loading) => {
+                items.push(small("Loading…".into(), muted));
+                return items;
+            }
+            Some(Scan::Unavailable(why)) => {
+                items.push(small(why.clone(), muted));
+                return items;
+            }
+            Some(Scan::Ready(scan)) => scan.clone(),
+        };
+        for finding in &scan.report.findings {
+            let place = match finding.line {
+                0 => finding.file.clone(),
+                line => format!("{}:{line} {}", finding.file, finding.excerpt),
+            };
+            items.push(small(
+                format!("⚠ {} · {place}", finding.message).into(),
+                theme.warning,
+            ));
+        }
+        for note in &scan.report.notes {
+            items.push(small(note.clone().into(), muted));
+        }
+        let files: Vec<&str> = scan.files.iter().map(|(path, _)| path.as_str()).collect();
+        items.push(small(format!("Files: {}", files.join(", ")).into(), muted));
+        if let Some((_, text)) = scan.files.iter().find(|(path, _)| path == "SKILL.md") {
+            items.extend(text.lines().take(400).map(|line| {
+                div()
+                    .px_2()
+                    .font_family("Menlo")
+                    .text_size(px(10.))
+                    .min_h(px(13.))
+                    .child(line.to_string())
+                    .into_any_element()
+            }));
+        }
+        items
+    }
+}
+
 impl Render for Palette {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let visible = self.visible(cx);
         self.highlight = self.highlight.min(visible.len().saturating_sub(1));
         let entries = self.entries(&visible);
         let stack_label = self.state.read(cx).stack_summary();
-        let rows: Vec<AnyElement> = entries
-            .iter()
-            .map(|entry| match entry {
-                Entry::Label { suggested } => section_label(*suggested, &stack_label, cx),
-                Entry::Row(ix) => {
-                    let highlighted = visible.get(self.highlight) == Some(ix);
-                    self.render_row(*ix, highlighted, cx)
-                }
-            })
-            .collect();
+        let rows: Vec<AnyElement> = match self.preview {
+            Some(id) => self.render_preview(id, cx),
+            None => entries
+                .iter()
+                .map(|entry| match entry {
+                    Entry::Label { suggested } => section_label(*suggested, &stack_label, cx),
+                    Entry::Row(ix) => {
+                        let highlighted = visible.get(self.highlight) == Some(ix);
+                        self.render_row(*ix, highlighted, cx)
+                    }
+                })
+                .collect(),
+        };
         let status = self.state.read(cx).install_status.clone();
+        let notice = self
+            .state
+            .read(cx)
+            .safety_notice
+            .as_ref()
+            .map(|n| (n.favorite, n.text.clone()));
         let theme = cx.theme();
         let updates = self
             .rows
@@ -363,16 +539,43 @@ impl Render for Palette {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .p(LIST_PADDING)
-                    .when(empty, |list| {
+                    .when(empty && self.preview.is_none(), |list| {
                         list.flex().items_center().px_3().text_size(px(12.)).text_color(theme.muted_foreground).child(
                             "No favorites yet. Paste a link or owner/repo in the menu bar popup.",
                         )
                     })
-                    .when(!empty && visible.is_empty(), |list| {
+                    .when(!empty && visible.is_empty() && self.preview.is_none(), |list| {
                         list.px_3().text_size(px(12.)).text_color(theme.muted_foreground).child("No matches")
                     })
                     .children(rows),
             )
+            .when_some(notice.clone(), |palette, (favorite, text)| {
+                palette.child(
+                    div()
+                        .h(NOTICE_HEIGHT)
+                        .px_3()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .text_size(px(12.))
+                        .text_color(theme.warning)
+                        .child(Icon::new(ExtraIcon::ShieldAlert).small())
+                        .child(div().flex_1().min_w_0().truncate().child(text))
+                        .child(
+                            div()
+                                .id("review")
+                                .cursor_pointer()
+                                .text_color(theme.foreground)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.preview = None;
+                                    this.toggle_preview(Some(favorite), cx)
+                                }))
+                                .child("Review"),
+                        ),
+                )
+            })
             .child(div().h(px(1.)).bg(theme.border))
             .child(
                 div()
@@ -383,11 +586,27 @@ impl Render for Palette {
                     .gap_3()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(status.unwrap_or_else(|| return_hint(installs, updates)))
+                    .child(match (status, notice.is_some()) {
+                        (Some(status), _) => status,
+                        (None, true) => "↩ Install anyway".into(),
+                        (None, false) => return_hint(installs, updates),
+                    })
                     .child(div().flex_1())
-                    .child("↑↓ move · space select · esc close"),
+                    .child(if self.preview.is_some() {
+                        "⌘Y or esc closes preview"
+                    } else {
+                        "↑↓ move · space select · ⌘Y preview · esc close"
+                    }),
             )
     }
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// "Update": primary text on a 12% primary background, fully rounded (DESIGN row states).
