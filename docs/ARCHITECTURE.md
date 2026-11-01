@@ -190,7 +190,7 @@ pub struct SavedState {
     pub settings: Settings,
     pub selected_project_id: Option<Uuid>,       // prototype key "selectedProjectID"
     pub installed: BTreeMap<String, String>,     // prototype key: "<project id|global>|<favorite id>" → version
-    // skill_state (pin / ignore, key = source(+skill)) arrives with T3.2
+    pub skill_state: BTreeMap<String, SkillState>, // key = source or source@skill: pinned, ignoredVersion, notifiedVersion
     #[serde(default)] pub provenance: Vec<ProvenanceEntry>,
     // keep append-only; trim old entries in a later polish task if needed
 }

@@ -99,6 +99,18 @@ pub fn toggle_popup(cx: &mut App) {
     }
 }
 
+/// Opens the popup unless it's already open (e.g. from a notification).
+pub fn show_popup(cx: &mut App) {
+    let open = cx
+        .default_global::<PopupWindow>()
+        .handle
+        .is_some_and(|handle| handle.update(cx, |_, _, _| ()).is_ok());
+    if !open {
+        cx.default_global::<PopupWindow>().blurred_at = None;
+        toggle_popup(cx);
+    }
+}
+
 pub fn popup_blurred(cx: &mut App) {
     cx.default_global::<PopupWindow>().blurred_at = Some(Instant::now());
     popup_closed(cx);
@@ -119,8 +131,11 @@ fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
         .find_display(display_id)
         .ok_or_else(|| anyhow::anyhow!("menu bar icon is on an unknown display"))?;
     let state = cx.global::<GlobalAppState>().0.clone();
-    let favorites = state.read(cx).data.favorites.len();
-    let size = size(popup::WIDTH, popup::height(favorites));
+    let (favorites, updates) = {
+        let state = state.read(cx);
+        (state.data.favorites.len(), !state.pending().is_empty())
+    };
+    let size = size(popup::WIDTH, popup::height(favorites, updates));
     // Centered under the icon, kept 8 px inside the screen edges.
     let max_x = display.bounds().size.width - size.width - px(8.);
     let x = (icon.center().x - size.width / 2.).max(px(8.)).min(max_x);

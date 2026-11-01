@@ -15,6 +15,8 @@ static CLICKED: AtomicBool = AtomicBool::new(false);
 
 /// 36 px artwork drawn at 18 pt; regenerate with `packaging/icon/make-menubar.sh`.
 const ICON: &[u8] = include_bytes!("../assets/tray/menubar@2x.png");
+/// The same with a dot: some project has an update.
+const ICON_UPDATE: &[u8] = include_bytes!("../assets/tray/menubar-update@2x.png");
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -32,6 +34,8 @@ define_class!(
 
 pub struct Tray {
     item: Retained<NSStatusItem>,
+    icon: Retained<NSImage>,
+    icon_update: Retained<NSImage>,
     // The button holds its target weakly; keep it alive here.
     _target: Retained<ClickTarget>,
 }
@@ -42,12 +46,9 @@ impl Tray {
     pub fn new(mtm: MainThreadMarker) -> Option<Self> {
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         let button = item.button(mtm)?;
-        let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(ICON))?;
-        image.setSize(NSSize::new(18., 18.));
-        // Template: AppKit tints it to match the menu bar (light, dark, highlighted).
-        image.setTemplate(true);
-        image.setAccessibilityDescription(Some(ns_string!("Loadout")));
-        button.setImage(Some(&image));
+        let icon = template_image(ICON)?;
+        let icon_update = template_image(ICON_UPDATE)?;
+        button.setImage(Some(&icon));
         // SAFETY: plain NSObject subclass with no ivars; `init` is NSObject's.
         let target: Retained<ClickTarget> = unsafe { msg_send![ClickTarget::alloc(mtm), init] };
         // SAFETY: `target` implements `click:` and lives as long as the item (both in `Tray`).
@@ -57,8 +58,22 @@ impl Tray {
         }
         Some(Self {
             item,
+            icon,
+            icon_update,
             _target: target,
         })
+    }
+
+    /// Shows the dot when any project has an update.
+    pub fn set_updates(&self, updates: bool) {
+        let Some(button) = MainThreadMarker::new().and_then(|mtm| self.item.button(mtm)) else {
+            return;
+        };
+        button.setImage(Some(if updates {
+            &self.icon_update
+        } else {
+            &self.icon
+        }));
     }
 
     /// The icon's display and frame, top-left origin relative to that display (GPUI's convention).
@@ -78,6 +93,15 @@ impl Tray {
         };
         Some((macos::display_id(&screen)?, bounds))
     }
+}
+
+fn template_image(png: &[u8]) -> Option<Retained<NSImage>> {
+    let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(png))?;
+    image.setSize(NSSize::new(18., 18.));
+    // Template: AppKit tints it to match the menu bar (light, dark, highlighted).
+    image.setTemplate(true);
+    image.setAccessibilityDescription(Some(ns_string!("Loadout")));
+    Some(image)
 }
 
 /// True once per click since the last call.

@@ -1,7 +1,7 @@
 //! Persisted data. Keys are camelCase and compatible with the prototype's `data.json`.
 //! Never rename or remove a key; every field has a default.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -130,6 +130,56 @@ pub struct SavedState {
     /// "<project id or global>|<favorite id>" → installed version ("?" = unknown). Prototype key.
     pub installed: BTreeMap<String, String>,
     pub provenance: Vec<ProvenanceEntry>,
+    /// Pin / ignore / notified, keyed by `skill_key`.
+    pub skill_state: BTreeMap<String, SkillState>,
+}
+
+/// Choices about one skill's updates.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkillState {
+    /// Stay on the installed version: no update is surfaced.
+    pub pinned: bool,
+    /// This latest version was dismissed; a newer one surfaces again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored_version: Option<String>,
+    /// The latest version a notification already mentioned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notified_version: Option<String>,
+}
+
+/// `skill_state` key: `source` or `source@skill`, so it survives removing and re-adding a favorite.
+pub fn skill_key(favorite: &Favorite) -> String {
+    let source = favorite.source.trim();
+    match favorite
+        .skill
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(skill) => format!("{source}@{skill}"),
+        None => source.to_string(),
+    }
+}
+
+/// A recorded install whose skill has a newer version on GitHub.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pending {
+    /// `None` = global.
+    pub project: Option<Uuid>,
+    pub favorite: Uuid,
+    pub installed: String,
+    pub latest: String,
+}
+
+/// `installed` key → (project or global, favorite).
+pub fn parse_installed_key(key: &str) -> Option<(Option<Uuid>, Uuid)> {
+    let (scope, favorite) = key.split_once('|')?;
+    let project = match scope {
+        "global" => None,
+        id => Some(Uuid::parse_str(id).ok()?),
+    };
+    Some((project, Uuid::parse_str(favorite).ok()?))
 }
 
 /// Outcome of `SavedState::add_favorites`, by display name.
@@ -162,6 +212,98 @@ impl SavedState {
         if let Some(version) = version {
             *entry = version.to_string();
         }
+    }
+
+    /// Sets the version after an update, replacing whatever was recorded.
+    pub fn set_installed_version(&mut self, project: Option<Uuid>, favorite: Uuid, version: &str) {
+        self.installed
+            .insert(installed_key(project, favorite), version.to_string());
+    }
+
+    /// Recorded installs: (project or global, favorite, version).
+    fn installs(&self) -> impl Iterator<Item = (Option<Uuid>, Uuid, &str)> {
+        self.installed.iter().filter_map(|(key, version)| {
+            let (project, favorite) = parse_installed_key(key)?;
+            Some((project, favorite, version.as_str()))
+        })
+    }
+
+    /// Favorites with at least one install whose version is known: the ones worth checking.
+    pub fn tracked_favorites(&self) -> Vec<Favorite> {
+        self.favorites
+            .iter()
+            .filter(|f| self.installs().any(|(_, id, v)| id == f.id && v != "?"))
+            .cloned()
+            .collect()
+    }
+
+    /// Recorded installs that are behind `latest`, minus pinned skills and ignored versions.
+    /// Installs in removed projects don't count. Ordered by favorite, then by key.
+    pub fn pending_updates(&self, latest: &HashMap<Uuid, String>) -> Vec<Pending> {
+        let mut pending = Vec::new();
+        for favorite in &self.favorites {
+            let Some(newest) = latest.get(&favorite.id) else {
+                continue;
+            };
+            let state = self.skill_state.get(&skill_key(favorite));
+            if state.is_some_and(|s| s.pinned || s.ignored_version.as_ref() == Some(newest)) {
+                continue;
+            }
+            for (project, id, version) in self.installs() {
+                let project_known = project.is_none_or(|p| self.projects.iter().any(|x| x.id == p));
+                if id == favorite.id && version != "?" && version != newest && project_known {
+                    pending.push(Pending {
+                        project,
+                        favorite: id,
+                        installed: version.to_string(),
+                        latest: newest.clone(),
+                    });
+                }
+            }
+        }
+        pending
+    }
+
+    /// Favorites in `pending` whose latest version wasn't announced yet; marks them announced.
+    pub fn take_unnotified(&mut self, pending: &[Pending]) -> Vec<Uuid> {
+        let mut fresh = Vec::new();
+        for p in pending {
+            let Some(favorite) = self.favorites.iter().find(|f| f.id == p.favorite) else {
+                continue;
+            };
+            let state = self.skill_state.entry(skill_key(favorite)).or_default();
+            if state.notified_version.as_ref() != Some(&p.latest) {
+                state.notified_version = Some(p.latest.clone());
+                fresh.push(p.favorite);
+            }
+        }
+        fresh
+    }
+
+    pub fn skill_state(&self, favorite: Uuid) -> SkillState {
+        self.favorites
+            .iter()
+            .find(|f| f.id == favorite)
+            .and_then(|f| self.skill_state.get(&skill_key(f)).cloned())
+            .unwrap_or_default()
+    }
+
+    fn skill_state_mut(&mut self, favorite: Uuid) -> Option<&mut SkillState> {
+        let key = skill_key(self.favorites.iter().find(|f| f.id == favorite)?);
+        Some(self.skill_state.entry(key).or_default())
+    }
+
+    pub fn set_pinned(&mut self, favorite: Uuid, pinned: bool) -> bool {
+        self.skill_state_mut(favorite)
+            .map(|s| s.pinned = pinned)
+            .is_some()
+    }
+
+    /// Hides `version` of this skill; a later version shows again.
+    pub fn ignore_update(&mut self, favorite: Uuid, version: &str) -> bool {
+        self.skill_state_mut(favorite)
+            .map(|s| s.ignored_version = Some(version.to_string()))
+            .is_some()
     }
 
     /// The saved project for `path`, added if new.
@@ -236,6 +378,128 @@ impl SavedState {
 mod tests {
     use super::*;
     use crate::parser::{favorite, parse};
+
+    fn updates_fixture() -> (SavedState, Uuid, Uuid, Uuid, Uuid) {
+        let mut state = SavedState::default();
+        state.add_favorites(parse(
+            "npx skills add anthropics/skills --skill frontend-design --skill pdf",
+        ));
+        state.add_favorites(parse("mattpocock/skills@tdd"));
+        let (fd, pdf, tdd) = (
+            state.favorites[0].id,
+            state.favorites[1].id,
+            state.favorites[2].id,
+        );
+        let shop = state.project_id(std::path::Path::new("/Code/shop"));
+        state.mark_installed(Some(shop), fd, Some("old-fd"));
+        state.mark_installed(None, fd, Some("old-fd"));
+        state.mark_installed(Some(shop), pdf, None); // unknown version: never an update
+        state.mark_installed(Some(shop), tdd, Some("same"));
+        (state, fd, pdf, tdd, shop)
+    }
+
+    #[test]
+    fn skill_keys_and_installed_keys_round_trip() {
+        assert_eq!(
+            skill_key(&favorite("x", "anthropics/skills", Some("pdf"))),
+            "anthropics/skills@pdf"
+        );
+        assert_eq!(
+            skill_key(&favorite("x", " anthropics/skills ", None)),
+            "anthropics/skills"
+        );
+        assert_eq!(skill_key(&favorite("x", "a/b", Some(""))), "a/b");
+        let (p, f) = (Uuid::new_v4(), Uuid::new_v4());
+        assert_eq!(
+            parse_installed_key(&installed_key(Some(p), f)),
+            Some((Some(p), f))
+        );
+        assert_eq!(
+            parse_installed_key(&installed_key(None, f)),
+            Some((None, f))
+        );
+        assert_eq!(parse_installed_key("nonsense"), None);
+    }
+
+    #[test]
+    fn pending_updates_compare_known_versions() {
+        let (state, fd, pdf, tdd, shop) = updates_fixture();
+        let latest = HashMap::from([
+            (fd, "new-fd".to_string()),
+            (pdf, "x".into()),
+            (tdd, "same".into()),
+        ]);
+        let pending = state.pending_updates(&latest);
+        let mut got: Vec<_> = pending
+            .iter()
+            .map(|p| (p.project, p.favorite, p.installed.as_str()))
+            .collect();
+        got.sort_by_key(|(p, _, _)| p.is_some());
+        assert_eq!(got, [(None, fd, "old-fd"), (Some(shop), fd, "old-fd")]);
+        assert!(pending.iter().all(|p| p.latest == "new-fd"));
+        assert!(state.pending_updates(&HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn pin_and_ignore_hide_updates() {
+        let (mut state, fd, _, _, _) = updates_fixture();
+        let latest = HashMap::from([(fd, "v2".to_string())]);
+        assert!(state.set_pinned(fd, true));
+        assert!(state.pending_updates(&latest).is_empty());
+        assert!(state.set_pinned(fd, false));
+        assert!(state.ignore_update(fd, "v2"));
+        assert!(state.pending_updates(&latest).is_empty());
+        // A newer version shows again.
+        assert_eq!(
+            state
+                .pending_updates(&HashMap::from([(fd, "v3".to_string())]))
+                .len(),
+            2
+        );
+        assert!(!state.set_pinned(Uuid::new_v4(), true));
+        // Persisted by skill, so it survives remove + re-add.
+        let key = skill_key(&state.favorites[0]);
+        assert_eq!(
+            state.skill_state[&key].ignored_version.as_deref(),
+            Some("v2")
+        );
+        state.remove_favorite(fd);
+        state.add_favorites(parse("anthropics/skills@frontend-design"));
+        let again = state.favorites.last().unwrap().id;
+        assert_eq!(
+            state.skill_state(again).ignored_version.as_deref(),
+            Some("v2")
+        );
+    }
+
+    #[test]
+    fn removed_projects_dont_count() {
+        let (mut state, fd, _, _, shop) = updates_fixture();
+        state.projects.retain(|p| p.id != shop);
+        let pending = state.pending_updates(&HashMap::from([(fd, "v2".to_string())]));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].project, None);
+    }
+
+    #[test]
+    fn notifies_each_version_once() {
+        let (mut state, fd, _, _, _) = updates_fixture();
+        let pending = state.pending_updates(&HashMap::from([(fd, "v2".to_string())]));
+        assert_eq!(state.take_unnotified(&pending), [fd]);
+        assert!(state.take_unnotified(&pending).is_empty());
+        let newer = state.pending_updates(&HashMap::from([(fd, "v3".to_string())]));
+        assert_eq!(state.take_unnotified(&newer), [fd]);
+    }
+
+    #[test]
+    fn tracked_and_updated_versions() {
+        let (mut state, fd, pdf, tdd, shop) = updates_fixture();
+        let tracked: Vec<_> = state.tracked_favorites().iter().map(|f| f.id).collect();
+        assert_eq!(tracked, [fd, tdd]);
+        state.set_installed_version(Some(shop), pdf, "v1");
+        assert_eq!(state.installed[&installed_key(Some(shop), pdf)], "v1");
+        assert!(state.tracked_favorites().iter().any(|f| f.id == pdf));
+    }
 
     #[test]
     fn installed_keys_match_the_prototype() {

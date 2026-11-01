@@ -63,7 +63,8 @@ GPUI Kit `IconName` where available; otherwise Lucide-style SVGs in `assets/icon
 
 **Menu bar icon:** monochrome template image, a simple "backpack/layers" glyph; outline normally, filled when any
 project has an update. The octopus from `reference/images-prototype/loadout-menubar.png` as a template image
-(`assets/tray/menubar@2x.png`, 36 px at 18 pt). The update state (T3.1) will add a small badge rather than a filled variant.
+(`assets/tray/menubar@2x.png`, 36 px at 18 pt). When any project has an update it switches to
+`menubar-update@2x.png`: the same glyph with a dot in the top-right.
 
 ## Row states
 

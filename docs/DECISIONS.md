@@ -259,3 +259,22 @@ image so AppKit tints it for light, dark, and highlighted menu bars. A template 
 the light-gray art into a blob, so `packaging/icon/make-menubar.sh` (ImageMagick) cuts the darker detail lines (eyes,
 smile, hat band) out of the silhouette at an 85 % gray threshold and writes a 36 px PNG. The binary embeds it
 (`include_bytes!`), so `cargo run` shows it too. Generated files are committed; builds don't need ImageMagick.
+
+## 034 — How updates are checked, shown, and applied
+**Choice:** A check fetches one tree per repo, only for favorites with an install recorded at a known version, so
+"?" installs (and skills other tools installed) cost no requests. It runs 3 s after launch, then every 6 hours, and
+from ↻. `SavedState::pending_updates` compares recorded versions with the session's latest versions: pinned skills,
+ignored versions, and installs in removed projects don't count. After each successful install or update, the job
+fetches that repo's tree once per batch and records the real version, so new installs are tracked from the start.
+An update re-runs `skills add` in each project that's behind (`-g` for global records), sets the new version, and
+appends an `update` provenance entry with `treeSha`. A project folder that's gone is skipped and noted in the log.
+**Calm:** each new version is notified once (`skillState.notifiedVersion` is persisted, so relaunching doesn't
+repeat it). A manual check marks updates seen without notifying. Clicking the notification opens the popup. The
+menu bar icon shows a dot while anything is pending.
+**Surfaces:** the popup shows an Update pill on rows (in place of the hover ✕) and "N updates available · Update all"
+only when something is pending. In the palette, an installed row with an update shows the pill and can be selected
+(never pre-selected); Return then updates it. The popup footer is now "Checked 4 minutes ago … ↻ ⚙". Output,
+automatic checks, open at login, test notification, and Quit moved into the ⚙ menu, per DESIGN rule 4. The popup's
+list area is now 4–7 rows high so other views fit in it.
+**Verified:** with real GitHub, a stale recorded version surfaced as one pending update; Update all re-ran the CLI and
+recorded the current tree SHA and an `update` entry. README-only vs folder changes are covered by core tests (T1.6).

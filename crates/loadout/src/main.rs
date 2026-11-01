@@ -15,6 +15,9 @@ actions!(loadout, [Quit]);
 
 /// How often hotkey and menu bar clicks are drained; cheap and never redraws.
 const HOTKEY_POLL: Duration = Duration::from_millis(50);
+/// Background update checks, like the prototype: shortly after launch, then every 6 hours.
+const FIRST_CHECK: Duration = Duration::from_secs(3);
+const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 
 fn main() {
     gpui_kit::application()
@@ -29,7 +32,20 @@ fn main() {
             views::palette::init(cx);
             views::popup::init(cx);
             let state = cx.new(|_| state::AppState::new());
-            cx.set_global(state::GlobalAppState(state));
+            cx.set_global(state::GlobalAppState(state.clone()));
+            cx.on_system_notification_response(|_, cx| windows::show_popup(cx));
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(FIRST_CHECK).await;
+                loop {
+                    state.update(cx, |state, cx| {
+                        if state.data.settings.auto_check {
+                            state.check_for_updates(true, cx);
+                        }
+                    });
+                    cx.background_executor().timer(CHECK_EVERY).await;
+                }
+            })
+            .detach();
 
             // Startup invariants: without the menu bar item and hotkey, Loadout is unreachable.
             let mtm = objc2::MainThreadMarker::new().expect("main thread");

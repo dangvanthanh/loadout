@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -6,13 +7,15 @@ use gpui_kit::*;
 use loadout_core::context::{self as signals, Context as Signals};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
-use loadout_core::model::{Added, Favorite, SavedState, Uuid};
+use loadout_core::model::{Added, Favorite, Pending, SavedState, Uuid};
 use loadout_core::stack::{self, StackTag};
+use loadout_core::updates::{self, Repo, Tree};
 use loadout_core::{agents, parser, project, provenance, storage, tags, ui_skills};
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
 use crate::macos::login_item::{self, LoginItem};
 use crate::macos::{self as mac};
+use crate::tray::Tray;
 
 /// Where the palette installs.
 #[derive(Clone, Debug, Default)]
@@ -53,18 +56,46 @@ pub struct AppState {
     pub installing: bool,
     /// "Installed 2 skills in shop-dashboard", shown in the palette footer.
     pub install_status: Option<SharedString>,
+    /// Favorite → latest version from the last check (session).
+    pub latest: HashMap<Uuid, String>,
+    /// Repo listings from the last check, reused by previews and diffs.
+    pub trees: HashMap<Repo, Tree>,
+    pub checking: bool,
+    /// Unix seconds.
+    pub last_checked: Option<u64>,
+    pub check_error: Option<SharedString>,
     _detect: Option<Task<()>>,
     _resolve: Option<Task<()>>,
     _install: Option<Task<()>>,
+    _check: Option<Task<()>>,
 }
 
 const LOG_LINES: usize = 2000;
 
-enum InstallEvent {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JobKind {
+    Install,
+    Update,
+}
+
+/// One `npx skills add` run.
+struct Job {
+    favorite: Favorite,
+    kind: JobKind,
+    /// `None` = global.
+    scope: Option<Uuid>,
+    /// `None` = home folder (global installs).
+    dir: Option<PathBuf>,
+    command: String,
+}
+
+enum JobEvent {
     Line(String),
     Done {
-        favorite: Favorite,
+        job: Box<Job>,
         result: Result<i32, InstallError>,
+        /// The skill's version right after a successful run.
+        version: Option<String>,
     },
 }
 
@@ -104,9 +135,15 @@ impl AppState {
             log: Vec::new(),
             installing: false,
             install_status: None,
+            latest: HashMap::new(),
+            trees: HashMap::new(),
+            checking: false,
+            last_checked: None,
+            check_error: None,
             _detect: None,
             _resolve: None,
             _install: None,
+            _check: None,
         }
     }
 
@@ -137,18 +174,15 @@ impl AppState {
         self.save();
     }
 
-    /// The install scope for the current target: its project id, or `None` for global.
-    fn scope(&self) -> Option<Uuid> {
-        let root = self
-            .target
-            .root
-            .as_deref()
-            .filter(|_| !self.data.settings.global)?;
-        self.data
-            .projects
-            .iter()
-            .find(|p| p.path == root)
-            .map(|p| p.id)
+    /// The current target's install scope: `Some(None)` = global, `Some(Some(id))` = a saved
+    /// project, `None` = nowhere to install.
+    fn target_scope(&self) -> Option<Option<Uuid>> {
+        if self.data.settings.global {
+            return Some(None);
+        }
+        let root = self.target.root.as_deref()?;
+        let project = self.data.projects.iter().find(|p| p.path == root)?;
+        Some(Some(project.id))
     }
 
     /// Whether `favorite` is in the current target: recorded by Loadout, or found in the
@@ -158,7 +192,10 @@ impl AppState {
         if !global && self.target.root.is_none() {
             return false;
         }
-        self.data.is_installed(self.scope(), favorite)
+        let recorded = self
+            .target_scope()
+            .is_some_and(|scope| self.data.is_installed(scope, favorite));
+        recorded
             || (!global
                 && self
                     .data
@@ -168,6 +205,21 @@ impl AppState {
                     .is_some_and(|f| self.target.installed.contains(f)))
     }
 
+    /// Recorded installs behind the latest version (pin / ignore applied).
+    pub fn pending(&self) -> Vec<Pending> {
+        self.data.pending_updates(&self.latest)
+    }
+
+    /// Whether `favorite` has an update in the current target.
+    pub fn update_here(&self, favorite: Uuid) -> bool {
+        let Some(scope) = self.target_scope() else {
+            return false;
+        };
+        self.pending()
+            .iter()
+            .any(|p| p.favorite == favorite && p.project == scope)
+    }
+
     fn push_log(&mut self, line: impl Into<SharedString>) {
         self.log.push(line.into());
         if self.log.len() > LOG_LINES {
@@ -175,9 +227,16 @@ impl AppState {
         }
     }
 
-    /// Installs `ids` into the current target with `npx skills add`, one after another, off the
-    /// main thread. Skips favorites already installed there. Output streams into `log`.
-    pub fn install(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
+    /// `npx skills add …` for one scope: `-g` exactly when the scope is global.
+    fn command_for(&self, favorite: &Favorite, global: bool) -> String {
+        let mut settings = self.data.settings.clone();
+        settings.global = global;
+        installer::install_command(favorite, &settings)
+    }
+
+    /// Palette Return: installs `ids` into the current target, and updates the ones installed
+    /// there with an update available. Others are skipped.
+    pub fn equip(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
         if self.installing || ids.is_empty() {
             return;
         }
@@ -191,10 +250,7 @@ impl AppState {
         let root = self.target.root.clone();
         let place = match (&root, global) {
             (_, true) => "Global".to_string(),
-            (Some(root), false) => root.file_name().map_or_else(
-                || root.display().to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            ),
+            (Some(root), false) => project_name(root),
             (None, false) => {
                 self.install_status = Some("No project to install into.".into());
                 cx.notify();
@@ -205,50 +261,126 @@ impl AppState {
             (Some(root), false) => Some(self.data.project_id(root)),
             _ => None,
         };
-        let todo: Vec<Favorite> = self
+        let dir = if global { None } else { root };
+        let jobs: Vec<Job> = self
             .data
             .favorites
             .iter()
-            .filter(|f| ids.contains(&f.id) && !self.is_installed_here(f.id))
-            .cloned()
+            .filter(|f| ids.contains(&f.id))
+            .filter_map(|f| {
+                let kind = if !self.is_installed_here(f.id) {
+                    JobKind::Install
+                } else if self.update_here(f.id) {
+                    JobKind::Update
+                } else {
+                    return None;
+                };
+                Some(Job {
+                    favorite: f.clone(),
+                    kind,
+                    scope,
+                    dir: dir.clone(),
+                    command: self.command_for(f, global),
+                })
+            })
             .collect();
-        if todo.is_empty() {
+        if jobs.is_empty() {
             self.install_status = Some("Already installed".into());
             cx.notify();
             return;
         }
+        self.run_jobs(jobs, Some(place), cx);
+    }
 
-        let settings = self.data.settings.clone();
-        let jobs: Vec<(Favorite, String)> = todo
-            .into_iter()
-            .map(|f| {
-                let command = installer::install_command(&f, &settings);
-                (f, command)
-            })
-            .collect();
+    /// Updates every pending install of `only` (or of every skill), in each project it's in.
+    pub fn update(&mut self, only: Option<Uuid>, cx: &mut Context<Self>) {
+        if self.installing {
+            return;
+        }
+        let mut jobs = Vec::new();
+        for p in self.pending() {
+            if only.is_some_and(|id| id != p.favorite) {
+                continue;
+            }
+            let Some(favorite) = self.data.favorites.iter().find(|f| f.id == p.favorite) else {
+                continue;
+            };
+            let dir = match p.project {
+                None => None,
+                Some(id) => match self.data.projects.iter().find(|x| x.id == id) {
+                    Some(project) if project.path.is_dir() => Some(project.path.clone()),
+                    Some(project) => {
+                        let line = format!(
+                            "Skipped {}: {} is gone",
+                            favorite.name,
+                            project.path.display()
+                        );
+                        self.push_log(line);
+                        continue;
+                    }
+                    None => continue,
+                },
+            };
+            jobs.push(Job {
+                favorite: favorite.clone(),
+                kind: JobKind::Update,
+                scope: p.project,
+                command: self.command_for(favorite, p.project.is_none()),
+                dir,
+            });
+        }
+        if jobs.is_empty() {
+            cx.notify();
+            return;
+        }
+        let place = match jobs.first().map(|j| j.dir.clone()) {
+            Some(dir) if jobs.iter().all(|j| j.dir == dir) => Some(
+                dir.as_deref()
+                    .map_or_else(|| "Global".to_string(), project_name),
+            ),
+            _ => None,
+        };
+        self.run_jobs(jobs, place, cx);
+    }
+
+    /// Runs `jobs` one after another off the main thread, streaming output into `log`, then
+    /// records versions and provenance.
+    fn run_jobs(&mut self, jobs: Vec<Job>, place: Option<String>, cx: &mut Context<Self>) {
+        let verb = if jobs.iter().all(|j| j.kind == JobKind::Update) {
+            "Updating"
+        } else {
+            "Installing"
+        };
         self.install_status = Some(match jobs.as_slice() {
-            [(one, _)] => format!("Installing {}…", one.name).into(),
-            many => format!("Installing {} skills…", many.len()).into(),
+            [one] => format!("{verb} {}…", one.favorite.name).into(),
+            many => format!("{verb} {} skills…", many.len()).into(),
         });
         self.installing = true;
         cx.notify();
 
-        let dir = if global { None } else { root.clone() };
         let (tx, rx) = mpsc::channel();
-        let work_dir = dir.clone();
         let work = cx.background_executor().spawn(async move {
-            for (favorite, command) in jobs {
-                let _ = tx.send(InstallEvent::Line(format!("$ {command}")));
-                let result = installer::run(&command, work_dir.as_deref(), |line| {
-                    let _ = tx.send(InstallEvent::Line(line.to_string()));
+            // Listings fetched for versions, one per repo for the whole batch.
+            let mut trees = HashMap::new();
+            for job in jobs {
+                let _ = tx.send(JobEvent::Line(format!("$ {}", job.command)));
+                let result = installer::run(&job.command, job.dir.as_deref(), |line| {
+                    let _ = tx.send(JobEvent::Line(line.to_string()));
                 });
-                let _ = tx.send(InstallEvent::Done { favorite, result });
+                let version = matches!(result, Ok(0))
+                    .then(|| updates::version_now(&job.favorite, &mut trees, None))
+                    .flatten();
+                let _ = tx.send(JobEvent::Done {
+                    job: Box::new(job),
+                    result,
+                    version,
+                });
             }
         });
-        let agent = Some(settings.agents.clone()).filter(|a| !a.trim().is_empty());
+        let agent = Some(self.data.settings.agents.clone()).filter(|a| !a.trim().is_empty());
         self._install = Some(cx.spawn(async move |this, cx| {
             let _work = work;
-            let (mut installed, mut failed, mut npx_missing) = (Vec::new(), Vec::new(), false);
+            let mut outcome = Outcome::default();
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
@@ -264,40 +396,29 @@ impl AppState {
                 let alive = this.update(cx, |this, cx| {
                     for event in events {
                         match event {
-                            InstallEvent::Line(line) => this.push_log(line),
-                            InstallEvent::Done { favorite, result } => match result {
-                                Ok(0) => {
-                                    this.data.mark_installed(scope, favorite.id, None);
-                                    let mut entry = provenance::entry(
-                                        provenance::INSTALL,
-                                        dir.as_deref(),
-                                        &favorite,
-                                    );
-                                    entry.agent = agent.clone();
-                                    provenance::append(&mut this.data, entry);
-                                    installed.push(favorite.name);
-                                }
-                                Ok(code) => {
-                                    this.push_log(format!("Exited with code {code}"));
-                                    failed.push(favorite.name);
-                                }
-                                Err(err) => {
-                                    npx_missing |= matches!(err, InstallError::NpxMissing);
-                                    this.push_log(err.to_string());
-                                    failed.push(favorite.name);
-                                }
-                            },
+                            JobEvent::Line(line) => this.push_log(line),
+                            JobEvent::Done {
+                                job,
+                                result,
+                                version,
+                            } => this.finish_job(
+                                *job,
+                                result,
+                                version,
+                                agent.as_deref(),
+                                &mut outcome,
+                            ),
                         }
                     }
                     if finished {
-                        if let Some(root) = dir.as_deref() {
+                        if let Some(root) = this.target.root.clone() {
                             let ids = agents::parse_list(&this.data.settings.agents);
-                            this.target.installed = installed::read(root, &ids);
+                            this.target.installed = installed::read(&root, &ids);
                         }
                         this.installing = false;
-                        this.install_status =
-                            Some(install_summary(&installed, &failed, npx_missing, &place).into());
+                        this.install_status = Some(outcome.summary(place.as_deref()).into());
                         this.save();
+                        this.refresh_badge(cx);
                     }
                     cx.notify();
                 });
@@ -306,6 +427,144 @@ impl AppState {
                 }
             }
         }));
+    }
+
+    fn finish_job(
+        &mut self,
+        job: Job,
+        result: Result<i32, InstallError>,
+        version: Option<String>,
+        agent: Option<&str>,
+        outcome: &mut Outcome,
+    ) {
+        let name = job.favorite.name.clone();
+        match result {
+            Ok(0) => {
+                let id = job.favorite.id;
+                if let Some(version) = &version {
+                    self.latest.insert(id, version.clone());
+                }
+                let action = match job.kind {
+                    JobKind::Install => {
+                        self.data.mark_installed(job.scope, id, version.as_deref());
+                        provenance::INSTALL
+                    }
+                    JobKind::Update => {
+                        // Unknown right now: assume the version the check reported.
+                        let version = version
+                            .clone()
+                            .or_else(|| self.latest.get(&id).cloned())
+                            .unwrap_or_else(|| "?".into());
+                        self.data.set_installed_version(job.scope, id, &version);
+                        provenance::UPDATE
+                    }
+                };
+                let mut entry = provenance::entry(action, job.dir.as_deref(), &job.favorite);
+                entry.tree_sha = version;
+                entry.agent = agent.map(str::to_string);
+                provenance::append(&mut self.data, entry);
+                match job.kind {
+                    JobKind::Install => outcome.installed.push(name),
+                    JobKind::Update => outcome.updated.push(name),
+                }
+            }
+            Ok(code) => {
+                self.push_log(format!("Exited with code {code}"));
+                outcome.failed.push((name, job.kind));
+            }
+            Err(err) => {
+                outcome.npx_missing |= matches!(err, InstallError::NpxMissing);
+                self.push_log(err.to_string());
+                outcome.failed.push((name, job.kind));
+            }
+        }
+    }
+
+    /// Fetches the latest versions of installed skills (one GitHub request per repo, off the
+    /// main thread). With `notify`, posts one notification for versions not announced before.
+    pub fn check_for_updates(&mut self, notify: bool, cx: &mut Context<Self>) {
+        if self.checking {
+            return;
+        }
+        let tracked = self.data.tracked_favorites();
+        if tracked.is_empty() {
+            self.last_checked = Some(provenance::now());
+            cx.notify();
+            return;
+        }
+        self.checking = true;
+        cx.notify();
+        let task = cx
+            .background_executor()
+            .spawn(async move { updates::check(&tracked, None) });
+        self._check = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.checking = false;
+                this.last_checked = Some(provenance::now());
+                this.check_error = result
+                    .rate_limited
+                    .then(|| updates::UpdateError::RateLimited.to_string().into());
+                this.latest.extend(result.latest);
+                this.trees.extend(result.trees);
+                let pending = this.pending();
+                let fresh = this.data.take_unnotified(&pending);
+                if !fresh.is_empty() {
+                    this.save();
+                    if notify {
+                        this.notify_updates(&fresh, cx);
+                    }
+                }
+                this.refresh_badge(cx);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    fn notify_updates(&self, fresh: &[Uuid], cx: &mut App) {
+        let names: Vec<&str> = fresh
+            .iter()
+            .filter_map(|id| self.data.favorites.iter().find(|f| f.id == *id))
+            .map(|f| f.name.as_str())
+            .collect();
+        let Some(first) = names.first() else { return };
+        let body = match names.len() {
+            1 => format!("{first} can be updated."),
+            n => format!("{first} and {} more can be updated.", n - 1),
+        };
+        cx.show_system_notification(SystemNotification {
+            tag: "updates".into(),
+            title: "Skill updates available".into(),
+            body: body.into(),
+            actions: Vec::new(),
+        });
+    }
+
+    /// The menu bar dot follows whether anything is pending.
+    fn refresh_badge(&self, cx: &mut App) {
+        let updates = !self.pending().is_empty();
+        if let Some(tray) = cx.try_global::<Tray>() {
+            tray.set_updates(updates);
+        }
+    }
+
+    pub fn set_auto_check(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.data.settings.auto_check = on;
+        self.save();
+        cx.notify();
+    }
+
+    /// "Checked 4 minutes ago" / "Checking for updates…" / the last error.
+    pub fn check_status(&self) -> Option<SharedString> {
+        if self.checking {
+            return Some("Checking for updates…".into());
+        }
+        if let Some(error) = &self.check_error {
+            return Some(error.clone());
+        }
+        self.last_checked
+            .map(|at| format!("Checked {}", provenance::ago(at, provenance::now())).into())
     }
 
     /// Resolves the target for `app` off the main thread; the last project stands in meanwhile.
@@ -515,27 +774,62 @@ impl AppState {
     }
 }
 
-/// "Installed 2 skills in shop-dashboard", "Couldn't install tdd. See log.", …
-fn install_summary(
-    installed: &[String],
-    failed: &[String],
+fn project_name(root: &std::path::Path) -> String {
+    root.file_name().map_or_else(
+        || root.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// What a batch of jobs did, by skill name.
+#[derive(Default)]
+struct Outcome {
+    installed: Vec<String>,
+    updated: Vec<String>,
+    failed: Vec<(String, JobKind)>,
     npx_missing: bool,
-    place: &str,
-) -> String {
-    if npx_missing {
-        return InstallError::NpxMissing.to_string();
-    }
-    let skills = |names: &[String]| match names {
-        [one] => one.clone(),
-        many => format!("{} skills", many.len()),
-    };
-    match (installed.is_empty(), failed.is_empty()) {
-        (_, true) => format!("Installed {} in {place}", skills(installed)),
-        (true, false) => format!("Couldn't install {}. See log.", skills(failed)),
-        (false, false) => format!(
-            "Installed {}; couldn't install {}. See log.",
-            skills(installed),
-            skills(failed)
-        ),
+}
+
+impl Outcome {
+    /// "Installed 2 skills in shop-dashboard", "Updated tdd", "Couldn't update tdd. See log.", …
+    fn summary(&self, place: Option<&str>) -> String {
+        if self.npx_missing {
+            return InstallError::NpxMissing.to_string();
+        }
+        let skills = |names: &[String]| match names {
+            [one] => one.clone(),
+            many => format!("{} skills", many.len()),
+        };
+        let mut done = match (self.installed.is_empty(), self.updated.is_empty()) {
+            (false, true) => format!("Installed {}", skills(&self.installed)),
+            (true, false) => format!("Updated {}", skills(&self.updated)),
+            (false, false) => format!(
+                "Installed {} and updated {}",
+                skills(&self.installed),
+                skills(&self.updated)
+            ),
+            (true, true) => String::new(),
+        };
+        if let Some(place) = place.filter(|_| !done.is_empty()) {
+            done += &format!(" in {place}");
+        }
+        if self.failed.is_empty() {
+            return done;
+        }
+        let verb = if self.failed.iter().all(|(_, k)| *k == JobKind::Update) {
+            "update"
+        } else {
+            "install"
+        };
+        let names: Vec<String> = self.failed.iter().map(|(n, _)| n.clone()).collect();
+        let failed = format!("couldn't {verb} {}. See log.", skills(&names));
+        if done.is_empty() {
+            let mut chars = failed.chars();
+            chars
+                .next()
+                .map_or(failed.clone(), |c| c.to_uppercase().chain(chars).collect())
+        } else {
+            format!("{done}; {failed}")
+        }
     }
 }

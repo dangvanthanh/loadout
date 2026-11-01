@@ -44,6 +44,15 @@ struct Row {
     suggested: bool,
     preselect: bool,
     installed: bool,
+    /// Installed here, with a newer version available.
+    update: bool,
+}
+
+impl Row {
+    /// Installed rows can only be selected to update them.
+    fn selectable(&self) -> bool {
+        !self.installed || self.update
+    }
 }
 
 /// What the list shows, in order: section labels and rows (index into `rows`).
@@ -122,6 +131,7 @@ impl Palette {
                     suggested: s.score > 0,
                     preselect: s.preselect(),
                     installed: state.is_installed_here(favorite.id),
+                    update: state.update_here(favorite.id),
                 }
             })
             .collect();
@@ -136,14 +146,14 @@ impl Palette {
                 .map(|r| r.id)
                 .collect();
         }
-        // Installed skills are skipped, so they're never part of the selection.
-        let installed: HashSet<Uuid> = self
+        // Installed skills are skipped, so they're never selected; updates are never preselected.
+        let blocked: HashSet<Uuid> = self
             .rows
             .iter()
-            .filter(|r| r.installed)
+            .filter(|r| !r.selectable() || (r.installed && !self.touched))
             .map(|r| r.id)
             .collect();
-        self.selected.retain(|id| !installed.contains(id));
+        self.selected.retain(|id| !blocked.contains(id));
     }
 
     /// Visible row indexes for the current query.
@@ -193,7 +203,7 @@ impl Palette {
     }
 
     fn toggle(&mut self, id: Uuid, cx: &mut Context<Self>) {
-        if self.rows.iter().any(|r| r.id == id && r.installed) {
+        if self.rows.iter().any(|r| r.id == id && !r.selectable()) {
             return;
         }
         self.touched = true;
@@ -228,7 +238,7 @@ impl Palette {
         cx.stop_propagation();
     }
 
-    /// Return: install the selection, or the highlighted row when nothing is selected.
+    /// Return: install (or update) the selection, or the highlighted row when nothing is selected.
     fn install(&mut self, cx: &mut Context<Self>) {
         let mut ids: Vec<Uuid> = self
             .rows
@@ -241,7 +251,7 @@ impl Palette {
         {
             ids.push(self.rows[ix].id);
         }
-        self.state.update(cx, |state, cx| state.install(&ids, cx));
+        self.state.update(cx, |state, cx| state.equip(&ids, cx));
     }
 
     fn dismiss(&mut self, _: &Dismiss, window: &mut Window, _: &mut Context<Self>) {
@@ -287,7 +297,8 @@ impl Palette {
                     .text_color(theme.muted_foreground)
                     .child(row.source.clone()),
             )
-            .when(row.installed, |row| {
+            .when(row.update, |row| row.child(update_pill(cx)))
+            .when(row.installed && !row.update, |row| {
                 row.child(
                     Icon::new(IconName::Check)
                         .small()
@@ -316,7 +327,12 @@ impl Render for Palette {
             .collect();
         let status = self.state.read(cx).install_status.clone();
         let theme = cx.theme();
-        let selected = self.selected.len();
+        let updates = self
+            .rows
+            .iter()
+            .filter(|r| r.installed && self.selected.contains(&r.id))
+            .count();
+        let installs = self.selected.len() - updates;
         let empty = self.rows.is_empty();
 
         div()
@@ -367,15 +383,41 @@ impl Render for Palette {
                     .gap_3()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(match (status, selected) {
-                        (Some(status), _) => status,
-                        (None, 0) => "↩ Install highlighted".into(),
-                        (None, 1) => "↩ Install 1 skill".into(),
-                        (None, n) => format!("↩ Install {n} skills").into(),
-                    })
+                    .child(status.unwrap_or_else(|| return_hint(installs, updates)))
                     .child(div().flex_1())
                     .child("↑↓ move · space select · esc close"),
             )
+    }
+}
+
+/// "Update": primary text on a 12% primary background, fully rounded (DESIGN row states).
+pub fn update_pill(cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .px_2()
+        .py(px(1.))
+        .rounded_full()
+        .bg(theme.primary.opacity(0.12))
+        .text_color(theme.primary)
+        .text_size(px(11.))
+        .font_weight(FontWeight::MEDIUM)
+        .child("Update")
+}
+
+/// The footer's Return hint for what's selected.
+fn return_hint(installs: usize, updates: usize) -> SharedString {
+    let skills = |n: usize| {
+        if n == 1 {
+            "1 skill".to_string()
+        } else {
+            format!("{n} skills")
+        }
+    };
+    match (installs, updates) {
+        (0, 0) => "↩ Install highlighted".into(),
+        (n, 0) => format!("↩ Install {}", skills(n)).into(),
+        (0, n) => format!("↩ Update {}", skills(n)).into(),
+        (a, b) => format!("↩ Install {a}, update {b}").into(),
     }
 }
 

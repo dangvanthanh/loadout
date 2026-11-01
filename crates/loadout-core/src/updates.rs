@@ -9,7 +9,7 @@ use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::model::Favorite;
+use crate::model::{Favorite, Uuid};
 use crate::parser::{is_shorthand, split_url};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +49,74 @@ pub enum UpdateError {
     Http(String),
     #[error("unexpected GitHub response: {0}")]
     Parse(String),
+}
+
+/// What one check learned.
+#[derive(Debug, Default)]
+pub struct CheckResult {
+    /// Favorite → latest version.
+    pub latest: HashMap<Uuid, String>,
+    /// Listings fetched, for previews and diffs without another request.
+    pub trees: HashMap<Repo, Tree>,
+    /// GitHub refused; the check stopped early.
+    pub rate_limited: bool,
+    /// Repos that couldn't be read (renamed, private, offline).
+    pub unreachable: Vec<Repo>,
+}
+
+/// Latest versions for `favorites`, one `fetch` per repo, in order of first appearance.
+/// Stops at a rate limit; skips repos that fail otherwise. Non-GitHub favorites are skipped.
+pub fn check_with(
+    favorites: &[Favorite],
+    mut fetch: impl FnMut(&Repo) -> Result<Tree, UpdateError>,
+) -> CheckResult {
+    let mut result = CheckResult::default();
+    for favorite in favorites {
+        let Some(skill_ref) = skill_ref(favorite) else {
+            continue;
+        };
+        let repo = &skill_ref.repo;
+        if !result.trees.contains_key(repo) && !result.unreachable.contains(repo) {
+            match fetch(repo) {
+                Ok(tree) => {
+                    result.trees.insert(repo.clone(), tree);
+                }
+                Err(UpdateError::RateLimited) => {
+                    result.rate_limited = true;
+                    break;
+                }
+                Err(_) => result.unreachable.push(repo.clone()),
+            }
+        }
+        if let Some(latest) = result
+            .trees
+            .get(repo)
+            .and_then(|tree| version(favorite, &skill_ref, tree))
+        {
+            result.latest.insert(favorite.id, latest);
+        }
+    }
+    result
+}
+
+/// `check_with` against GitHub (blocking).
+pub fn check(favorites: &[Favorite], token: Option<&str>) -> CheckResult {
+    check_with(favorites, |repo| fetch_tree(repo, token))
+}
+
+/// The favorite's version right now, fetching its repo's listing unless `trees` has it
+/// (blocking). For recording what an install or update just fetched.
+pub fn version_now(
+    favorite: &Favorite,
+    trees: &mut HashMap<Repo, Tree>,
+    token: Option<&str>,
+) -> Option<String> {
+    let skill_ref = skill_ref(favorite)?;
+    if !trees.contains_key(&skill_ref.repo) {
+        let tree = fetch_tree(&skill_ref.repo, token).ok()?;
+        trees.insert(skill_ref.repo.clone(), tree);
+    }
+    version(favorite, &skill_ref, &trees[&skill_ref.repo])
 }
 
 /// GitHub owner/repo (and folder) for a favorite; `None` for non-GitHub sources.
@@ -305,6 +373,55 @@ mod tests {
             owner: owner.into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn check_fetches_each_repo_once() {
+        let favs = vec![
+            favorite(
+                "frontend-design",
+                "anthropics/skills",
+                Some("frontend-design"),
+            ),
+            favorite(
+                "pdf",
+                "https://github.com/anthropics/skills/tree/main/skills/pdf",
+                None,
+            ),
+            favorite("site", "https://docs.example.com", Some("x")),
+            favorite("gone", "acme/gone", Some("gone")),
+        ];
+        let mut calls = Vec::new();
+        let result = check_with(&favs, |repo| {
+            calls.push(repo.name.clone());
+            match repo.name.as_str() {
+                "skills" => Ok(tree("before")),
+                _ => Err(UpdateError::NotFound),
+            }
+        });
+        assert_eq!(calls, ["skills", "gone"]);
+        assert_eq!(result.latest[&favs[0].id], "t1fd");
+        assert_eq!(result.latest[&favs[1].id], "t0pdf");
+        assert_eq!(result.latest.len(), 2);
+        assert!(result.trees.contains_key(&repo("anthropics", "skills")));
+        assert_eq!(result.unreachable, [repo("acme", "gone")]);
+        assert!(!result.rate_limited);
+    }
+
+    #[test]
+    fn check_stops_at_rate_limit() {
+        let favs = vec![
+            favorite("a", "x/one", Some("a")),
+            favorite("b", "x/two", Some("b")),
+        ];
+        let mut calls = 0;
+        let result = check_with(&favs, |_| {
+            calls += 1;
+            Err(UpdateError::RateLimited)
+        });
+        assert_eq!(calls, 1);
+        assert!(result.rate_limited);
+        assert!(result.latest.is_empty());
     }
 
     #[test]

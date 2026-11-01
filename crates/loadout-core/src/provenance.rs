@@ -19,6 +19,18 @@ pub fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// "just now", "1 minute ago", "4 hours ago", "3 days ago". Future times read as "just now".
+pub fn ago(then: u64, now: u64) -> String {
+    let secs = now.saturating_sub(then);
+    let (n, unit) = match secs {
+        0..60 => return "just now".into(),
+        60..3600 => (secs / 60, "minute"),
+        3600..86_400 => (secs / 3600, "hour"),
+        _ => (secs / 86_400, "day"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+}
+
 /// A new entry for `favorite`; set `tree_sha`, `agent`, `loadout_id`, `note` as known.
 /// `project` is `None` for global installs.
 pub fn entry(action: &str, project: Option<&Path>, favorite: &Favorite) -> ProvenanceEntry {
@@ -102,6 +114,20 @@ mod tests {
         append(&mut state, at(entry(UPDATE, Some(shop), &fd), 300));
         append(&mut state, at(entry(REMOVE, None, &tdd), 300));
         (state, fd, tdd)
+    }
+
+    #[test]
+    fn relative_times() {
+        let now = 1_800_000_000;
+        assert_eq!(ago(now, now), "just now");
+        assert_eq!(ago(now - 59, now), "just now");
+        assert_eq!(ago(now - 60, now), "1 minute ago");
+        assert_eq!(ago(now - 4 * 60 - 30, now), "4 minutes ago");
+        assert_eq!(ago(now - 3600, now), "1 hour ago");
+        assert_eq!(ago(now - 5 * 3600, now), "5 hours ago");
+        assert_eq!(ago(now - 86_400, now), "1 day ago");
+        assert_eq!(ago(now - 40 * 86_400, now), "40 days ago");
+        assert_eq!(ago(now + 10, now), "just now");
     }
 
     #[test]

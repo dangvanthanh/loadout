@@ -77,7 +77,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Context signals for ranking (recent files / open editors when available)
 
 ### M3 — Calm updates and trust (U3, U4, U8)
-- ⬜ Update check, Update pill, notification, filled menu bar icon
+- ✅ Update check, Update pill, notification, filled menu bar icon
 - ⬜ What changed (files + SKILL.md diff), pin, ignore
 - ⬜ Safety + compatibility glance on first install; skill preview
 - ⬜ Provenance entries written on install/update/remove

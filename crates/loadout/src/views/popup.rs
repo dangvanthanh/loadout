@@ -1,8 +1,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
+use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Theme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::model::Uuid;
@@ -10,6 +9,7 @@ use loadout_core::model::Uuid;
 use crate::Quit;
 use crate::macos::login_item::LoginItem;
 use crate::state::AppState;
+use crate::views::palette::update_pill;
 use crate::windows;
 
 actions!(popup, [Dismiss]);
@@ -20,22 +20,26 @@ const PADDING: Pixels = px(14.);
 const INPUT_HEIGHT: Pixels = px(30.);
 const NOTICE_HEIGHT: Pixels = px(18.);
 const ROW_HEIGHT: Pixels = px(44.);
-const EMPTY_HEIGHT: Pixels = px(32.);
+const UPDATE_BAR_HEIGHT: Pixels = px(28.);
 const FOOTER_HEIGHT: Pixels = px(28.);
 const GAP: Pixels = px(8.);
+const MIN_ROWS: usize = 4;
 const MAX_ROWS: usize = 7;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
 }
 
-/// Window height for `favorites` rows: at most seven, then the list scrolls.
-pub fn height(favorites: usize) -> Pixels {
-    let list = match favorites {
-        0 => EMPTY_HEIGHT,
-        n => ROW_HEIGHT * n.min(MAX_ROWS) as f32,
+/// Window height for `favorites` rows: four to seven, then the list scrolls (other views, like
+/// the log, share the list area). The update bar only when something is pending.
+pub fn height(favorites: usize, updates: bool) -> Pixels {
+    let list = ROW_HEIGHT * favorites.clamp(MIN_ROWS, MAX_ROWS) as f32;
+    let bar = if updates {
+        UPDATE_BAR_HEIGHT + GAP
+    } else {
+        px(0.)
     };
-    PADDING * 2. + INPUT_HEIGHT + NOTICE_HEIGHT + list + px(1.) + FOOTER_HEIGHT + GAP * 4.
+    PADDING * 2. + INPUT_HEIGHT + NOTICE_HEIGHT + list + bar + px(1.) + FOOTER_HEIGHT + GAP * 4.
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -193,6 +197,12 @@ impl Popup {
             })
         };
         let state = self.state.clone();
+        let has_update = self
+            .state
+            .read(cx)
+            .pending()
+            .iter()
+            .any(|p| p.favorite == id);
         div()
             .id(("favorite", ix))
             .group("favorite")
@@ -228,21 +238,35 @@ impl Popup {
                             .into_any_element(),
                     }),
             )
-            .child(
-                div()
-                    .opacity(0.)
-                    .group_hover("favorite", |s| s.opacity(1.))
-                    .child(
-                        Button::new(("remove", ix))
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::Close)
-                            .tooltip("Remove")
-                            .on_click(move |_, _, cx| {
-                                state.update(cx, |state, cx| state.remove_favorite(id, cx))
-                            }),
-                    ),
-            )
+            .when(has_update, |row| {
+                let state = self.state.clone();
+                row.child(
+                    div()
+                        .id(("update", ix))
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            state.update(cx, |state, cx| state.update(Some(id), cx))
+                        })
+                        .child(update_pill(cx)),
+                )
+            })
+            .when(!has_update, |row| {
+                row.child(
+                    div()
+                        .opacity(0.)
+                        .group_hover("favorite", |s| s.opacity(1.))
+                        .child(
+                            Button::new(("remove", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Close)
+                                .tooltip("Remove")
+                                .on_click(move |_, _, cx| {
+                                    state.update(cx, |state, cx| state.remove_favorite(id, cx))
+                                }),
+                        ),
+                )
+            })
             .context_menu(move |menu, _, _| {
                 menu.item(menu_item("Rename…", Some(Field::Name)))
                     .item(menu_item("Tags…", Some(Field::Tags)))
@@ -264,6 +288,11 @@ impl Render for Popup {
         let theme = cx.theme();
         let state = self.state.read(cx);
         let login_on = state.login_item != LoginItem::Off;
+        let auto_check = state.data.settings.auto_check;
+        let checking = state.checking;
+        let check_status = state.check_status();
+        let pending = state.pending().len();
+        let busy = state.installing;
         let notice = state
             .popup_notice
             .clone()
@@ -329,6 +358,34 @@ impl Render for Popup {
                     })
                     .children(rows),
             )
+            .when(pending > 0, |popup| {
+                popup.child(
+                    div()
+                        .h(UPDATE_BAR_HEIGHT)
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(px(12.))
+                        .child(div().size(px(6.)).rounded_full().bg(theme.primary))
+                        .child(match pending {
+                            1 => "1 update available".to_string(),
+                            n => format!("{n} updates available"),
+                        })
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("update-all")
+                                .ghost()
+                                .xsmall()
+                                .label("Update all")
+                                .disabled(busy)
+                                .on_click({
+                                    let state = self.state.clone();
+                                    move |_, _, cx| state.update(cx, |state, cx| state.update(None, cx))
+                                }),
+                        ),
+                )
+            })
             .child(div().h(px(1.)).bg(theme.border))
             .child(
                 div()
@@ -337,45 +394,61 @@ impl Render for Popup {
                     .items_center()
                     .gap_1()
                     .child(
-                        Switch::new("open-at-login")
-                            .checked(login_on)
-                            .label("Open at login")
-                            .small()
-                            .on_click({
-                                let state = self.state.clone();
-                                move |on, _, cx| {
-                                    state.update(cx, |state, cx| state.set_open_at_login(*on, cx))
-                                }
-                            }),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(theme.muted_foreground)
+                            .children(check_status),
                     )
-                    .child(div().flex_1())
-                    .when(has_log, |footer| {
-                        footer.child(
-                            Button::new("log")
-                                .ghost()
-                                .xsmall()
-                                .label(if self.show_log { "Favorites" } else { "Log" })
-                                .on_click(cx.listener(|this, _, _, cx| this.toggle_log(cx))),
-                        )
-                    })
                     .child(
-                        Button::new("test-notification")
+                        Button::new("check")
                             .ghost()
                             .xsmall()
-                            .label("Test notification")
+                            .icon(IconName::RotateCw)
+                            .tooltip("Check for updates")
+                            .disabled(checking)
                             .on_click({
                                 let state = self.state.clone();
                                 move |_, _, cx| {
-                                    state.update(cx, |state, cx| state.send_test_notification(cx))
+                                    state.update(cx, |state, cx| state.check_for_updates(false, cx))
                                 }
                             }),
                     )
                     .child(
-                        Button::new("quit")
+                        Button::new("settings")
                             .ghost()
                             .xsmall()
-                            .label("Quit")
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(Quit), cx)),
+                            .icon(IconName::Settings)
+                            .tooltip("More")
+                            .dropdown_menu_with_anchor(Anchor::BottomRight, {
+                                let state = self.state.clone();
+                                let this = cx.entity().downgrade();
+                                move |menu, _, _| {
+                                    let item = |label: &'static str| PopupMenuItem::new(label);
+                                    let this = this.clone();
+                                    let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
+                                    menu.when(has_log, |menu| {
+                                        menu.item(item("Output").on_click(move |_, _, cx| {
+                                            this.update(cx, |this, cx| this.toggle_log(cx)).ok();
+                                        }))
+                                    })
+                                    .item(item("Check for updates automatically").checked(auto_check).on_click(
+                                        move |_, _, cx| s1.update(cx, |s, cx| s.set_auto_check(!auto_check, cx)),
+                                    ))
+                                    .item(item("Open at login").checked(login_on).on_click(
+                                        move |_, _, cx| s2.update(cx, |s, cx| s.set_open_at_login(!login_on, cx)),
+                                    ))
+                                    .item(item("Send test notification").on_click(move |_, _, cx| {
+                                        s3.update(cx, |s, cx| s.send_test_notification(cx))
+                                    }))
+                                    .separator()
+                                    .item(item("Quit Loadout").on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(Quit), cx)
+                                    }))
+                                }
+                            }),
                     ),
             )
     }

@@ -126,7 +126,7 @@ Wire the context module into the palette ranking path (best-effort; graceful whe
 
 ## M3 — Calm updates and trust (U3, U4, U8)
 
-### [ ] T3.1 Update check + UI
+### [x] T3.1 Update check + UI (2026-11-01)
 Background check, Update pill, filled menu bar icon, notification when real updates exist.
 **Accept:** changing a skill folder on GitHub surfaces an update; README-only does not.
 
