@@ -68,6 +68,19 @@ fallback to the most recent project.
 standard macOS permission prompts.
 **Open:** T0.3 records which editors expose `AXDocument` (Zed, VS Code, Cursor, Xcode, JetBrains) and any per-app
 fallbacks (e.g. parsing the window title).
+**T0.3 result (2026-10-31):**
+- Finder runs through `/usr/bin/osascript` on the background executor instead of `NSAppleScript`, which is
+  main-thread only and would stall the palette. TCC attributes the Automation prompt to Loadout (the responsible
+  process). `-1743` in stderr = not allowed → the Into line says what to do.
+- Every other app goes through one generic path: `AXFocusedWindow` (or `AXMainWindow`) → `AXDocument` → file URL →
+  its folder. No per-app code. A small `extern "C"` block plus `core-foundation` 0.10 (already in GPUI's tree) is
+  the AX FFI; no `accessibility-sys`. The system prompt shows once per launch.
+- Expected to work: Zed (GPUI sets `representedFilename`), VS Code / Cursor (Electron sets it for the active
+  file), Xcode, Terminal and Ghostty (proxy icon = working directory). JetBrains IDEs are unlikely to expose it.
+  Not yet confirmed on a machine with the permissions granted; correct this list during the T0.3 hand check.
+- The folder is the document's folder; walking up to the project root is T1.4.
+- Fallback: the last detected folder for this session, labelled "last used" (persisted projects arrive with T1.1).
+  No window-title parsing: titles give a project name, not a path.
 
 ## 013 — Primary development agent is Pi Harness
 **Choice:** Docs, commands, and workflow are written for Pi Harness (`AGENTS.md`, `docs/PI_HARNESS_GUIDE.md`). Other agents

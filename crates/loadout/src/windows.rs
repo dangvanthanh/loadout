@@ -1,6 +1,7 @@
 use gpui_kit::*;
 
-use crate::macos;
+use crate::macos::{self, frontmost};
+use crate::state::{AppState, GlobalAppState};
 use crate::views::palette::{self, Palette};
 
 #[derive(Default)]
@@ -17,13 +18,17 @@ pub fn toggle_palette(cx: &mut App) {
     {
         return;
     }
-    match open_palette(cx) {
+    // Read the frontmost app before the palette exists, so it is never Loadout.
+    let app = frontmost::frontmost_app();
+    let state = cx.global::<GlobalAppState>().0.clone();
+    state.update(cx, |state, cx| state.detect_target(app, cx));
+    match open_palette(state, cx) {
         Ok(handle) => cx.set_global(PaletteWindow(Some(handle))),
         Err(err) => eprintln!("couldn't open the palette: {err:#}"),
     }
 }
 
-fn open_palette(cx: &mut App) -> Result<AnyWindowHandle> {
+fn open_palette(state: Entity<AppState>, cx: &mut App) -> Result<AnyWindowHandle> {
     let display_id = macos::active_display_id();
     let display = display_id
         .and_then(|id| cx.find_display(id))
@@ -50,7 +55,7 @@ fn open_palette(cx: &mut App) -> Result<AnyWindowHandle> {
         ..Default::default()
     };
     let (handle, _) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| Palette::new(window, cx))
+        cx.new(|cx| Palette::new(state, window, cx))
     })?;
     Ok(handle)
 }

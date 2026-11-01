@@ -1,5 +1,7 @@
 //! macOS glue. Keep `unsafe` small, each with a `// SAFETY:` comment.
 
+pub mod frontmost;
+
 use gpui_kit::DisplayId;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;

@@ -1,5 +1,6 @@
 mod hotkey;
 mod macos;
+mod state;
 mod views;
 mod windows;
 
@@ -23,6 +24,8 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         views::palette::init(cx);
+        let state = cx.new(|_| state::AppState::default());
+        cx.set_global(state::GlobalAppState(state));
 
         // Startup invariant: without the hotkey the palette is unreachable.
         let hotkey = hotkey::Hotkey::register(hotkey::DEFAULT).expect("register global hotkey");

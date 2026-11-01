@@ -38,7 +38,7 @@ Answer the questions that could change the architecture before writing features.
 **Accept:** from any app, ⌃⌥L shows the palette with the cursor in the search field; Esc closes it and focus returns
 to the previous app.
 
-### [ ] T0.3 "Project you're in" detection (spike for U1)
+### [x] T0.3 "Project you're in" detection (spike for U1) (2026-10-31)
 - `macos/frontmost.rs`: get the frontmost app (`NSWorkspace.frontmostApplication`) *before* the palette takes focus.
 - Finder: `NSAppleScript` → POSIX path of the front window's target (Automation permission prompt on first use).
 - Editors (Zed, VS Code, Cursor, Xcode, JetBrains): read `AXDocument` / `AXTitle` of the focused window via the

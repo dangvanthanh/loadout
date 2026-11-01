@@ -61,7 +61,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ### M0 — Foundation
 - ⬜ GPUI + GPUI Kit app, menu bar icon, popup under the icon, no Dock icon
 - ✅ Global hotkey ⌃⌥L opens a palette window
-- ⬜ Frontmost Finder/editor folder detection (spike for U1)
+- ✅ Frontmost Finder/editor folder detection (spike for U1)
 - ⬜ App bundle, notifications, open at login
 
 ### M1 — Core library (no UI, fully tested)
