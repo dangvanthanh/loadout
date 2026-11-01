@@ -105,7 +105,7 @@ scan plus simple compatibility notes.
 Palette shows Into line, Suggested / Loadouts / Other sections, keyboard navigation. Pre-select and rank by stack + context.
 **Accept:** ⌃⌥L on a Next.js project pre-selects the right favorites; ranking looks sensible.
 
-### [ ] T2.2 Favorites management
+### [x] T2.2 Favorites management (2026-10-31)
 Paste to add (any supported format), tags, rename, remove. Persist immediately.
 **Accept:** paste several formats; they appear and survive relaunch.
 

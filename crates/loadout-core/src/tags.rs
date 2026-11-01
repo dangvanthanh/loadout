@@ -109,6 +109,22 @@ pub fn suggest_tags(favorite: &Favorite) -> Vec<String> {
     tags
 }
 
+/// "React, nextjs ,, react" → ["react", "nextjs"].
+pub fn parse_tags(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for tag in text.split(',') {
+        let tag = tag
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join("-")
+            .to_lowercase();
+        if !tag.is_empty() && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Suggestion {
     /// Index into the ranked slice.
@@ -235,6 +251,13 @@ mod tests {
 
     fn names<'a>(favs: &'a [Favorite], ranked: &[Suggestion]) -> Vec<&'a str> {
         ranked.iter().map(|s| favs[s.index].name.as_str()).collect()
+    }
+
+    #[test]
+    fn parses_tag_text() {
+        assert_eq!(parse_tags("React, nextjs ,, react"), ["react", "nextjs"]);
+        assert_eq!(parse_tags("web design"), ["web-design"]);
+        assert!(parse_tags(" , ").is_empty());
     }
 
     #[test]

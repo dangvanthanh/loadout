@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use gpui_kit::*;
-use loadout_core::model::{Project, SavedState};
+use loadout_core::model::{Added, Favorite, Project, SavedState, Uuid};
 use loadout_core::stack::{self, StackTag};
-use loadout_core::{project, provenance, storage};
+use loadout_core::{parser, project, provenance, storage, tags, ui_skills};
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
 use crate::macos::login_item::{self, LoginItem};
@@ -31,6 +31,7 @@ pub struct AppState {
     /// Last popup status line, e.g. why open at login failed.
     pub popup_notice: Option<SharedString>,
     _detect: Option<Task<()>>,
+    _resolve: Option<Task<()>>,
 }
 
 pub struct GlobalAppState(pub Entity<AppState>);
@@ -67,6 +68,7 @@ impl AppState {
             login_item: login_item::status(),
             popup_notice,
             _detect: None,
+            _resolve: None,
         }
     }
 
@@ -208,6 +210,83 @@ impl AppState {
             actions: Vec::new(),
         });
         cx.notify();
+    }
+
+    /// Pasted text → favorites. ui-skills.com pages are fetched off the main thread.
+    pub fn add_from_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        if ui_skills::is_ui_skills_url(&text) {
+            self.popup_notice = Some("Reading ui-skills.com…".into());
+            cx.notify();
+            let task = cx
+                .background_executor()
+                .spawn(async move { ui_skills::resolve(&text) });
+            self._resolve = Some(cx.spawn(async move |this, cx| {
+                let result = task.await;
+                this.update(cx, |this, cx| {
+                    match result {
+                        Ok(Some(favorite)) => this.add_favorites(vec![favorite]),
+                        Ok(None) => {
+                            this.popup_notice =
+                                Some("Couldn't find the repo on that ui-skills.com page.".into())
+                        }
+                        Err(_) => {
+                            this.popup_notice =
+                                Some("Couldn't load ui-skills.com. Check your connection.".into())
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }));
+            return;
+        }
+        let parsed = parser::parse(&text);
+        if parsed.is_empty() {
+            self.popup_notice = Some(
+                "Couldn't read that. Paste owner/repo, a GitHub or skills.sh link, or an npx skills add command."
+                    .into(),
+            );
+        } else {
+            self.add_favorites(parsed);
+        }
+        cx.notify();
+    }
+
+    fn add_favorites(&mut self, favorites: Vec<Favorite>) {
+        let Added { added, skipped } = self.data.add_favorites(favorites);
+        self.popup_notice = Some(match (added.as_slice(), skipped.as_slice()) {
+            ([one], _) => format!("Added {one}").into(),
+            ([], [one]) => format!("{one} is already a favorite").into(),
+            ([], _) => "Already favorites".into(),
+            (many, _) => format!("Added {} favorites", many.len()).into(),
+        });
+        self.save();
+    }
+
+    pub fn rename_favorite(&mut self, id: Uuid, name: &str, cx: &mut Context<Self>) {
+        if self.data.rename_favorite(id, name) {
+            self.save();
+            cx.notify();
+        }
+    }
+
+    pub fn set_favorite_tags(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
+        if self.data.set_favorite_tags(id, tags::parse_tags(text)) {
+            self.save();
+            cx.notify();
+        }
+    }
+
+    pub fn remove_favorite(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        if let Some(favorite) = self.data.remove_favorite(id) {
+            self.popup_notice = Some(format!("Removed {}", favorite.name).into());
+            self.save();
+            cx.notify();
+        }
     }
 
     /// "Next.js, Tailwind" for the Into line.

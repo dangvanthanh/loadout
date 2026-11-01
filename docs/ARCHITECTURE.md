@@ -57,7 +57,7 @@ loadout/
   crates/
     loadout-core/src/
       lib.rs
-      model.rs                    Favorite, Project, Loadout, Settings, SavedState, SkillState, ProvenanceEntry
+      model.rs                    Favorite, Project, Loadout, Settings, SavedState (+ favorite edits), ProvenanceEntry
       storage.rs                  load/save data.json (atomic), prototype import
       agents.rs                   agent ids, project/global skill folders, launch commands
       parser.rs                   paste text → Vec<Favorite>
@@ -78,6 +78,7 @@ loadout/
     loadout-core/tests/fixtures/  projects/, trees/, html/, data/
     loadout/src/
       main.rs                     Application, gpui_kit::init, activation policy, hotkey, tray, timers
+      assets.rs                   GPUI Kit assets + extra icons (icon_assets!)
       state.rs                    AppState entity: data + session + actions
       hotkey.rs                   ⌃⌥L via global-hotkey, polled by a GPUI timer
       tray.rs                     NSStatusItem (objc2), popup toggle, icon state

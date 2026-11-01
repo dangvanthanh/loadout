@@ -101,6 +101,13 @@ pub fn toggle_popup(cx: &mut App) {
 
 pub fn popup_blurred(cx: &mut App) {
     cx.default_global::<PopupWindow>().blurred_at = Some(Instant::now());
+    popup_closed(cx);
+}
+
+/// Notices are for the moment they happen; the next popup starts clean.
+pub fn popup_closed(cx: &mut App) {
+    let state = cx.global::<GlobalAppState>().0.clone();
+    state.update(cx, |state, _| state.popup_notice = None);
 }
 
 fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
@@ -111,12 +118,13 @@ fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
     let display = cx
         .find_display(display_id)
         .ok_or_else(|| anyhow::anyhow!("menu bar icon is on an unknown display"))?;
-    let size = size(popup::WIDTH, popup::height());
+    let state = cx.global::<GlobalAppState>().0.clone();
+    let favorites = state.read(cx).data.favorites.len();
+    let size = size(popup::WIDTH, popup::height(favorites));
     // Centered under the icon, kept 8 px inside the screen edges.
     let max_x = display.bounds().size.width - size.width - px(8.);
     let x = (icon.center().x - size.width / 2.).max(px(8.)).min(max_x);
     let origin = point(x, icon.bottom() + px(4.));
-    let state = cx.global::<GlobalAppState>().0.clone();
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds { origin, size })),
         titlebar: None,

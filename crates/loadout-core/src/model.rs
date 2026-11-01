@@ -131,3 +131,146 @@ pub struct SavedState {
     pub installed: BTreeMap<String, String>,
     pub provenance: Vec<ProvenanceEntry>,
 }
+
+/// Outcome of `SavedState::add_favorites`, by display name.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Added {
+    pub added: Vec<String>,
+    /// Already saved (same source and skill).
+    pub skipped: Vec<String>,
+}
+
+impl SavedState {
+    /// Adds favorites not already saved; untagged ones get `tags::suggest_tags`.
+    pub fn add_favorites(&mut self, favorites: Vec<Favorite>) -> Added {
+        let mut result = Added::default();
+        for mut favorite in favorites {
+            let same = |f: &Favorite| {
+                f.source.eq_ignore_ascii_case(&favorite.source)
+                    && f.skill.as_deref().unwrap_or("") == favorite.skill.as_deref().unwrap_or("")
+            };
+            if self.favorites.iter().any(same) {
+                result.skipped.push(favorite.name);
+                continue;
+            }
+            if favorite.tags.is_empty() {
+                favorite.tags = crate::tags::suggest_tags(&favorite);
+            }
+            result.added.push(favorite.name.clone());
+            self.favorites.push(favorite);
+        }
+        result
+    }
+
+    fn favorite_mut(&mut self, id: Uuid) -> Option<&mut Favorite> {
+        self.favorites.iter_mut().find(|f| f.id == id)
+    }
+
+    /// Trimmed; empty names are refused.
+    pub fn rename_favorite(&mut self, id: Uuid, name: &str) -> bool {
+        let name = name.trim();
+        match self.favorite_mut(id) {
+            Some(favorite) if !name.is_empty() => {
+                favorite.name = name.to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn set_favorite_tags(&mut self, id: Uuid, tags: Vec<String>) -> bool {
+        self.favorite_mut(id).map(|f| f.tags = tags).is_some()
+    }
+
+    /// Also drops the favorite from loadouts and from install records.
+    pub fn remove_favorite(&mut self, id: Uuid) -> Option<Favorite> {
+        let index = self.favorites.iter().position(|f| f.id == id)?;
+        for loadout in &mut self.loadouts {
+            loadout.favorite_ids.retain(|f| *f != id);
+        }
+        // Keys are "<project id or global>|<favorite id>".
+        self.installed.retain(|key, _| {
+            key.rsplit_once('|')
+                .and_then(|(_, fav)| Uuid::parse_str(fav).ok())
+                != Some(id)
+        });
+        Some(self.favorites.remove(index))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{favorite, parse};
+
+    #[test]
+    fn add_skips_duplicates_and_suggests_tags() {
+        let mut state = SavedState::default();
+        let first = state.add_favorites(parse("anthropics/skills@frontend-design"));
+        assert_eq!(first.added, ["frontend-design"]);
+        assert_eq!(state.favorites[0].tags, ["frontend"]);
+
+        let again = state.add_favorites(parse(
+            "npx skills add Anthropics/Skills --skill frontend-design --skill pdf",
+        ));
+        assert_eq!(
+            again,
+            Added {
+                added: vec!["pdf".into()],
+                skipped: vec!["frontend-design".into()]
+            }
+        );
+        assert_eq!(state.favorites.len(), 2);
+
+        // Whole source and one skill from it are different favorites.
+        assert_eq!(
+            state.add_favorites(parse("anthropics/skills")).added,
+            ["skills"]
+        );
+    }
+
+    #[test]
+    fn add_keeps_given_tags() {
+        let mut state = SavedState::default();
+        let mut fav = favorite("tdd", "mattpocock/skills", Some("tdd"));
+        fav.tags = vec!["custom".into()];
+        state.add_favorites(vec![fav]);
+        assert_eq!(state.favorites[0].tags, ["custom"]);
+    }
+
+    #[test]
+    fn rename_and_tags() {
+        let mut state = SavedState::default();
+        state.add_favorites(parse("mattpocock/skills@tdd"));
+        let id = state.favorites[0].id;
+        assert!(state.rename_favorite(id, "  Test first  "));
+        assert_eq!(state.favorites[0].name, "Test first");
+        assert!(!state.rename_favorite(id, "   "));
+        assert!(!state.rename_favorite(Uuid::new_v4(), "x"));
+        assert!(state.set_favorite_tags(id, vec!["testing".into()]));
+        assert_eq!(state.favorites[0].tags, ["testing"]);
+    }
+
+    #[test]
+    fn remove_cleans_loadouts_and_installs() {
+        let mut state = SavedState::default();
+        state.add_favorites(parse("npx skills add a/b --skill x --skill y"));
+        let (x, y) = (state.favorites[0].id, state.favorites[1].id);
+        state.loadouts.push(Loadout {
+            name: "L".into(),
+            favorite_ids: vec![x, y],
+            ..Default::default()
+        });
+        let x_key = format!("global|{}", x.hyphenated().to_string().to_uppercase());
+        let y_key = format!("global|{}", y.hyphenated().to_string().to_uppercase());
+        state.installed.insert(x_key.clone(), "v1".into());
+        state.installed.insert(y_key.clone(), "v1".into());
+
+        assert_eq!(state.remove_favorite(x).map(|f| f.name), Some("x".into()));
+        assert_eq!(state.favorites.len(), 1);
+        assert_eq!(state.loadouts[0].favorite_ids, [y]);
+        assert!(!state.installed.contains_key(&x_key));
+        assert!(state.installed.contains_key(&y_key));
+        assert_eq!(state.remove_favorite(x), None);
+    }
+}

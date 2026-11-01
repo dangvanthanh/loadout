@@ -203,3 +203,10 @@ in the capture phase before the search field: ↑↓ move, Tab toggles, Space to
 (otherwise it types), Esc closes. The window height is fixed at open for up to seven rows; longer lists scroll.
 **Deferred:** the Loadouts section arrives with T4.1, because no loadout can exist before then. Extra icons
 (circle, sparkles) come from GPUI Kit's `icon_assets!`.
+
+## 027 — Favorites are managed in the popup
+**Choice:** The popup's paste field (Return adds) accepts every parser format; ui-skills.com links resolve in the
+background. `SavedState::add_favorites` skips duplicates (same source, case-insensitive, and skill) and tags
+untagged favorites with `suggest_tags`. Right-click a row for Rename… / Tags… (inline field, Return saves, Esc
+cancels) / Remove; hovering a row also shows ✕. Removing drops the favorite from loadouts and from `installed`.
+Every change saves at once. Popup notices ("Added pdf") clear when the popup closes.
