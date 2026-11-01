@@ -1,6 +1,7 @@
 //! macOS glue. Keep `unsafe` small, each with a `// SAFETY:` comment.
 
 pub mod frontmost;
+pub mod launch;
 pub mod login_item;
 
 use gpui_kit::DisplayId;

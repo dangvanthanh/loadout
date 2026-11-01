@@ -167,6 +167,7 @@ pub struct Settings {
     #[serde(default)] pub digest_enabled: bool,                  // U11
     #[serde(default)] pub digest_interval_hours: u32,            // e.g. 24 or 168
     #[serde(default)] pub launch_after_install: bool,            // default for equip+launch
+    #[serde(default)] pub launchers: BTreeMap<String, String>,   // agent id → shell command, {dir} = project
     // … other calm defaults
 }
 

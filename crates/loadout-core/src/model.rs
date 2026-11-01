@@ -77,6 +77,10 @@ pub struct Settings {
     pub digest_interval_hours: u32,
     /// Default for equip + launch.
     pub launch_after_install: bool,
+    /// Agent id → shell command that opens it, `{dir}` = the project folder. Overrides
+    /// `launch::launcher`'s defaults.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub launchers: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -89,6 +93,7 @@ impl Default for Settings {
             digest_enabled: false,
             digest_interval_hours: 24,
             launch_after_install: false,
+            launchers: BTreeMap::new(),
         }
     }
 }

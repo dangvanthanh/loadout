@@ -85,7 +85,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ### M4 — Loadouts and agent awareness (U5, U7, U9)
 - ✅ Create, apply, manage loadouts (including preferred agent)
 - ✅ Diff against loadout
-- ⬜ One-shot equip + launch
+- ✅ One-shot equip + launch
 - ⬜ Share and import via link or file
 
 ### M5 — Team, digest, polish and release

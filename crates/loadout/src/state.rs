@@ -12,7 +12,9 @@ use loadout_core::model::{Added, Favorite, Pending, ProvenanceEntry, SavedState,
 use loadout_core::safety::{self, Report};
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
-use loadout_core::{agents, loadout_diff, parser, project, provenance, storage, tags, ui_skills};
+use loadout_core::{
+    agents, launch, loadout_diff, parser, project, provenance, storage, tags, ui_skills,
+};
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
 use crate::macos::login_item::{self, LoginItem};
@@ -72,8 +74,9 @@ pub struct AppState {
     pub scans: HashMap<Uuid, Scan>,
     /// Shown in the palette when a first install has findings; Return again installs anyway.
     pub safety_notice: Option<SafetyNotice>,
-    /// An equip waiting for its scans; it runs (or shows the notice) when they land.
-    awaiting: Option<Vec<Uuid>>,
+    /// An equip waiting for its scans (ids, launch); it runs or shows the notice when they land.
+    awaiting: Option<(Vec<Uuid>, bool)>,
+    _launch: Option<Task<()>>,
     _scans: Vec<Task<()>>,
     _detect: Option<Task<()>>,
     _changes: Option<Task<()>>,
@@ -101,6 +104,8 @@ pub struct SkillScan {
 pub struct SafetyNotice {
     /// The equip it holds back.
     pub ids: Vec<Uuid>,
+    /// That equip asked to open the agent afterwards.
+    pub launch: bool,
     /// The first flagged skill, for "Review".
     pub favorite: Uuid,
     pub text: SharedString,
@@ -197,6 +202,7 @@ impl AppState {
             scans: HashMap::new(),
             safety_notice: None,
             awaiting: None,
+            _launch: None,
             _scans: Vec::new(),
             _detect: None,
             _changes: None,
@@ -295,12 +301,16 @@ impl AppState {
 
     /// Palette Return: installs `ids` into the current target, and updates the ones installed
     /// there with an update available. Others are skipped.
-    pub fn equip(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
+    /// With `launch`, opens the agent (`agent_for`) in the target afterwards (U9).
+    pub fn equip(&mut self, ids: &[Uuid], launch: bool, cx: &mut Context<Self>) {
         if self.installing || ids.is_empty() {
             return;
         }
-        // Return on a notice for the same selection: install anyway.
-        let anyway = self.safety_notice.take().is_some_and(|n| n.ids == ids);
+        // Return on a notice for the same selection: install anyway (and launch if either asked).
+        let (anyway, launch) = match self.safety_notice.take() {
+            Some(notice) if notice.ids == ids => (true, launch || notice.launch),
+            _ => (false, launch),
+        };
         self.awaiting = None;
         // The Into line may still show the fallback project; never install there by accident.
         if self.target.detecting {
@@ -324,6 +334,10 @@ impl AppState {
             _ => None,
         };
         let dir = if global { None } else { root };
+        let open_after = launch
+            .then(|| self.agent_for(ids))
+            .flatten()
+            .map(|agent| (agent, dir.clone().or_else(dirs_home)));
         // Loadouts expand into their skills; a skill keeps the first loadout that asked for it.
         let mut wanted: Vec<(Uuid, Option<Uuid>)> = Vec::new();
         for id in ids {
@@ -367,19 +381,70 @@ impl AppState {
             .collect();
         if jobs.is_empty() {
             self.install_status = Some("Already installed".into());
+            if let Some((agent, Some(dir))) = open_after {
+                self.open_agent(agent, dir, None, cx);
+            }
             cx.notify();
             return;
         }
-        if !anyway && self.hold_for_safety(ids, &jobs, cx) {
+        if !anyway && self.hold_for_safety(ids, launch, &jobs, cx) {
             return;
         }
-        self.run_jobs(jobs, Some(place), cx);
+        self.run_jobs(jobs, Some(place), open_after, cx);
+    }
+
+    /// The agent an equip of `ids` would open: the first selected loadout's preferred agent,
+    /// else the first configured agent.
+    pub fn agent_for(&self, ids: &[Uuid]) -> Option<String> {
+        let preferred: Vec<Option<String>> = ids
+            .iter()
+            .filter_map(|id| self.data.loadout(*id))
+            .map(|l| l.preferred_agent.clone())
+            .collect();
+        launch::pick_agent(&preferred, &self.data.settings.agents)
+    }
+
+    /// Opens `agent` in `dir` off the main thread. `done` (what the batch did) leads the status.
+    fn open_agent(
+        &mut self,
+        agent: String,
+        dir: PathBuf,
+        done: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let custom = self.data.settings.launchers.clone();
+        let name = launch::agent_name(&agent).to_string();
+        let task = cx
+            .background_executor()
+            .spawn(async move { mac::launch::open(&agent, &dir, &custom) });
+        self._launch = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.install_status = Some(
+                    match (done, result) {
+                        (Some(done), Ok(())) => format!("{done} · opened {name}"),
+                        (None, Ok(())) => format!("Opened {name}"),
+                        (Some(done), Err(err)) => format!("{done}. {err}"),
+                        (None, Err(err)) => err,
+                    }
+                    .into(),
+                );
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// First installs get a glance before running (U4): waits for their scans, then shows a
     /// notice if any has findings. True when the equip is held back. Never blocks for good:
     /// a scan that fails counts as no findings, and Return on the notice installs anyway.
-    fn hold_for_safety(&mut self, ids: &[Uuid], jobs: &[Job], cx: &mut Context<Self>) -> bool {
+    fn hold_for_safety(
+        &mut self,
+        ids: &[Uuid],
+        launch: bool,
+        jobs: &[Job],
+        cx: &mut Context<Self>,
+    ) -> bool {
         let first: Vec<Uuid> = jobs
             .iter()
             .filter(|j| j.kind == JobKind::Install && self.needs_glance(j.favorite.id))
@@ -391,7 +456,7 @@ impl AppState {
             .filter(|id| matches!(self.scans.get(id), Some(Scan::Loading)))
             .count();
         if loading > 0 {
-            self.awaiting = Some(ids.to_vec());
+            self.awaiting = Some((ids.to_vec(), launch));
             self.install_status = Some(match loading {
                 1 => "Checking the skill…".into(),
                 n => format!("Checking {n} skills…").into(),
@@ -417,6 +482,7 @@ impl AppState {
         }
         self.safety_notice = Some(SafetyNotice {
             ids: ids.to_vec(),
+            launch,
             favorite: *favorite,
             text: text.into(),
         });
@@ -478,12 +544,12 @@ impl AppState {
                     this.scans.insert(id, scan);
                 }
                 this.trees.extend(trees);
-                let ready = this.awaiting.as_ref().is_some_and(|ids| {
+                let ready = this.awaiting.as_ref().is_some_and(|(ids, _)| {
                     !ids.iter()
                         .any(|id| matches!(this.scans.get(id), Some(Scan::Loading)))
                 });
-                if ready && let Some(ids) = this.awaiting.take() {
-                    this.equip(&ids, cx);
+                if ready && let Some((ids, launch)) = this.awaiting.take() {
+                    this.equip(&ids, launch, cx);
                 }
                 cx.notify();
             })
@@ -546,12 +612,18 @@ impl AppState {
             ),
             _ => None,
         };
-        self.run_jobs(jobs, place, cx);
+        self.run_jobs(jobs, place, None, cx);
     }
 
     /// Runs `jobs` one after another off the main thread, streaming output into `log`, then
     /// records versions and provenance.
-    fn run_jobs(&mut self, jobs: Vec<Job>, place: Option<String>, cx: &mut Context<Self>) {
+    fn run_jobs(
+        &mut self,
+        jobs: Vec<Job>,
+        place: Option<String>,
+        mut open_after: Option<(String, Option<PathBuf>)>,
+        cx: &mut Context<Self>,
+    ) {
         let verb = if jobs.iter().all(|j| j.kind == JobKind::Update) {
             "Updating"
         } else {
@@ -623,7 +695,13 @@ impl AppState {
                         }
                         this.installing = false;
                         this.record_applied(&outcome.applied);
-                        this.install_status = Some(outcome.summary(place.as_deref()).into());
+                        let summary = outcome.summary(place.as_deref());
+                        this.install_status = Some(summary.clone().into());
+                        // Open the agent unless every job failed.
+                        let worked = !outcome.installed.is_empty() || !outcome.updated.is_empty();
+                        if worked && let Some((agent, Some(dir))) = open_after.take() {
+                            this.open_agent(agent, dir, Some(summary), cx);
+                        }
                         this.save();
                         this.refresh_badge(cx);
                     }
@@ -1020,6 +1098,12 @@ impl AppState {
             .map_or_else(String::new, |f| f.name.clone())
     }
 
+    pub fn set_launch_after_install(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.data.settings.launch_after_install = on;
+        self.save();
+        cx.notify();
+    }
+
     pub fn set_auto_check(&mut self, on: bool, cx: &mut Context<Self>) {
         self.data.settings.auto_check = on;
         self.save();
@@ -1307,6 +1391,10 @@ fn scan_skills(
         results.push((favorite.id, scan));
     }
     (results, trees)
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 fn project_name(root: &std::path::Path) -> String {

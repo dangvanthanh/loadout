@@ -362,7 +362,7 @@ impl Palette {
     }
 
     /// Keys while the diff shows: move and toggle among missing skills, install, go back.
-    fn diff_key(&mut self, loadout: Uuid, key: &str, cx: &mut Context<Self>) -> bool {
+    fn diff_key(&mut self, loadout: Uuid, key: &str, launch: bool, cx: &mut Context<Self>) -> bool {
         let missing = self.state.read(cx).loadout_diff(loadout).missing;
         match key {
             "escape" => self.set_diff(None, cx),
@@ -388,7 +388,9 @@ impl Palette {
                     .into_iter()
                     .filter(|id| self.diff_selected.contains(id))
                     .collect();
-                self.state.update(cx, |state, cx| state.equip(&ids, cx));
+                let launch = launch || self.launch_by_default(cx);
+                self.state
+                    .update(cx, |state, cx| state.equip(&ids, launch, cx));
             }
             _ => return false,
         }
@@ -476,11 +478,18 @@ impl Palette {
             cx.stop_propagation();
             return;
         }
+        // ⌘↩ installs and then opens the agent (U9).
+        let launch = modifiers.platform && key == "enter";
         if let Some(loadout) = self.diff {
             let plain = !(modifiers.platform || modifiers.control || modifiers.alt);
-            if plain && self.diff_key(loadout, key, cx) {
+            if (plain || launch) && self.diff_key(loadout, key, launch, cx) {
                 cx.stop_propagation();
             }
+            return;
+        }
+        if launch {
+            self.install(true, cx);
+            cx.stop_propagation();
             return;
         }
         // ⌘Y previews, like Quick Look in Finder; Esc leaves a preview before closing.
@@ -508,16 +517,25 @@ impl Palette {
             "tab" => self.toggle_highlighted(cx),
             // With a query, space types; Tab still toggles.
             "space" if query_empty => self.toggle_highlighted(cx),
-            "enter" => self.install(cx),
+            "enter" => {
+                let launch = self.launch_by_default(cx);
+                self.install(launch, cx)
+            }
             _ => return,
         }
         cx.stop_propagation();
     }
 
     /// Return: install (or update) the selection, or the highlighted row when nothing is selected.
-    fn install(&mut self, cx: &mut Context<Self>) {
+    fn install(&mut self, launch: bool, cx: &mut Context<Self>) {
         let ids = self.chosen(cx);
-        self.state.update(cx, |state, cx| state.equip(&ids, cx));
+        self.state
+            .update(cx, |state, cx| state.equip(&ids, launch, cx));
+    }
+
+    /// Plain Return opens the agent too when the user chose that in the ⚙ menu.
+    fn launch_by_default(&self, cx: &App) -> bool {
+        self.state.read(cx).data.settings.launch_after_install
     }
 
     fn dismiss(&mut self, _: &Dismiss, window: &mut Window, _: &mut Context<Self>) {
@@ -880,6 +898,24 @@ impl Render for Palette {
                 .count()
         });
         let loadout_highlighted = self.highlighted_loadout(cx).is_some();
+        // "· ⌘↩ + open Pi", or "+ open Pi" when Return opens it anyway.
+        let launch_hint = {
+            let state = self.state.read(cx);
+            state.agent_for(&self.chosen(cx)).map(|agent| {
+                let name = loadout_core::launch::agent_name(&agent).to_string();
+                if state.data.settings.launch_after_install {
+                    format!(" + open {name}")
+                } else {
+                    format!(" · ⌘↩ + open {name}")
+                }
+            })
+        };
+        let with_launch = |hint: SharedString| -> SharedString {
+            match &launch_hint {
+                Some(launch) => format!("{hint}{launch}").into(),
+                None => hint,
+            }
+        };
         let empty = self.rows.is_empty();
 
         div()
@@ -978,8 +1014,12 @@ impl Render for Palette {
                         (false, Some(status), ..) => status,
                         (false, None, true, _) => "↩ Install anyway".into(),
                         (false, None, false, Some(0)) => "Nothing selected".into(),
-                        (false, None, false, Some(n)) => format!("↩ Install {n} missing").into(),
-                        (false, None, false, None) => return_hint(installs, updates, &loadouts),
+                        (false, None, false, Some(n)) => {
+                            with_launch(format!("↩ Install {n} missing").into())
+                        }
+                        (false, None, false, None) => {
+                            with_launch(return_hint(installs, updates, &loadouts))
+                        }
                     })
                     .child(div().flex_1())
                     .child(if self.naming {

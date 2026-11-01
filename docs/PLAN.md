@@ -154,7 +154,7 @@ Named sets, preferred agent field, apply in one action. Suggest loadouts by stac
 From a loadout row or keyboard: show missing / extra / present skills for the current project.
 **Accept:** gaps are clear; user can select missing ones and install.
 
-### [ ] T4.3 One-shot equip + launch (U9)
+### [x] T4.3 One-shot equip + launch (U9) (2026-11-01)
 ⌘↩ or checkbox: after install/apply, launch the preferred agent (Pi, Cursor, …) via configured command / URL scheme.
 **Accept:** applying a loadout with preferred agent Pi opens Pi (or the configured launcher).
 

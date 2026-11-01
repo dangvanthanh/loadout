@@ -822,6 +822,7 @@ impl Render for Popup {
         let state = self.state.read(cx);
         let login_on = state.login_item != LoginItem::Off;
         let auto_check = state.data.settings.auto_check;
+        let launch_after = state.data.settings.launch_after_install;
         let checking = state.checking;
         let check_status = state.check_status();
         let pending = state.pending().len();
@@ -962,7 +963,8 @@ impl Render for Popup {
                                 move |menu, _, _| {
                                     let item = |label: &'static str| PopupMenuItem::new(label);
                                     let (this, history, loadouts) = (this.clone(), this.clone(), this.clone());
-                                    let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
+                                    let (s1, s2, s3, s4) =
+                                        (state.clone(), state.clone(), state.clone(), state.clone());
                                     menu.item(item("Loadouts").on_click(move |_, _, cx| {
                                         loadouts
                                             .update(cx, |this, cx| this.set_view(View::Loadouts, cx))
@@ -984,6 +986,9 @@ impl Render for Popup {
                                     })
                                     .item(item("Check for updates automatically").checked(auto_check).on_click(
                                         move |_, _, cx| s1.update(cx, |s, cx| s.set_auto_check(!auto_check, cx)),
+                                    ))
+                                    .item(item("Open agent after installing").checked(launch_after).on_click(
+                                        move |_, _, cx| s4.update(cx, |s, cx| s.set_launch_after_install(!launch_after, cx)),
                                     ))
                                     .item(item("Open at login").checked(login_on).on_click(
                                         move |_, _, cx| s2.update(cx, |s, cx| s.set_open_at_login(!login_on, cx)),

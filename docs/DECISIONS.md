@@ -344,3 +344,20 @@ so installed skills move from Missing to Installed as they land. Global targets 
 are read.
 **Verified:** a project with `tdd` and an unrelated `notes` skill, against "Web app" (frontend-design + tdd), showed
 missing frontend-design, installed tdd, extra notes. Installing the missing one left nothing missing.
+
+## 040 — Equip + launch
+**Choice:** ⌘↩ (or plain Return with ⚙ → "Open agent after installing") installs, then opens an agent in the
+project folder (the home folder for global installs). The agent is the first selected loadout's preferred agent,
+else the first id in `settings.agents`. It opens unless every job failed; an "Already installed" equip opens it
+straight away. The footer names it: "↩ Apply Web app · ⌘↩ + open Pi".
+**How it opens (`launch.rs`, run by `macos/launch.rs` off the main thread):**
+- CLI agents (pi, claude, codex, gemini, opencode, goose, amp, qwen, kiro-cli): checked with `command -v` in a login
+  shell, then a `.command` file in `~/Library/Caches/Loadout/` (`cd '<dir>' && exec pi`) is opened. Terminal, or the
+  user's default app for `.command`, runs it: no Automation permission, no AppleScript.
+- Editor agents (Cursor, Zed, Windsurf, Trae, Warp; VS Code for Copilot, Cline, Roo): `open -a <App> <dir>`.
+- `settings.launchers` (agent id → shell command, `{dir}` replaced by the quoted folder) overrides either, e.g.
+  Ghostty for pi. Editing it waits for the settings panel (T5.3); it's plain JSON until then.
+**Graceful:** a missing CLI or app, an agent with no launcher, or a failing custom command becomes one footer line
+("Goose isn't installed (goose wasn't found).") after the install summary. The install itself is unaffected.
+**Verified:** applying "Web app" (preferred agent pi, with a custom launcher) installed its skill and ran the launcher
+in a folder whose path has a space; the missing-CLI and missing-app messages showed for goose and Windsurf.
