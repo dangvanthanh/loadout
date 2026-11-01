@@ -150,7 +150,7 @@ Simple log view in the popup (or a dedicated sheet). Filter by project optional.
 Named sets, preferred agent field, apply in one action. Suggest loadouts by stack tags.
 **Accept:** create "Web app", apply it; preferred agent is stored.
 
-### [ ] T4.2 Diff against loadout (U7)
+### [x] T4.2 Diff against loadout (U7) (2026-11-01)
 From a loadout row or keyboard: show missing / extra / present skills for the current project.
 **Accept:** gaps are clear; user can select missing ones and install.
 

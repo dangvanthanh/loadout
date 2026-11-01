@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use gpui_kit::assets::IconName as ExtraIcon;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
 use gpui_kit::prelude::FluentBuilder;
@@ -100,6 +101,12 @@ pub struct Palette {
     highlight: usize,
     /// The favorite whose files the list area shows instead of rows.
     preview: Option<Uuid>,
+    /// The loadout the list area compares the project with (⌘D).
+    diff: Option<Uuid>,
+    /// Missing skills chosen to install from the diff.
+    diff_selected: HashSet<Uuid>,
+    /// Index into the diff's missing skills.
+    diff_highlight: usize,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -158,6 +165,9 @@ impl Palette {
             touched: false,
             highlight: 0,
             preview: None,
+            diff: None,
+            diff_selected: HashSet::new(),
+            diff_highlight: 0,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -324,6 +334,67 @@ impl Palette {
         ids
     }
 
+    /// Compares the project with `loadout` in the list area, missing skills pre-selected; `None`
+    /// goes back to the list.
+    fn set_diff(&mut self, loadout: Option<Uuid>, cx: &mut Context<Self>) {
+        self.diff = loadout;
+        self.preview = None;
+        self.diff_highlight = 0;
+        self.diff_selected = loadout
+            .map(|id| {
+                self.state
+                    .read(cx)
+                    .loadout_diff(id)
+                    .missing
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.scroll = ScrollHandle::new();
+        cx.notify();
+    }
+
+    /// The highlighted row's id, if it's a loadout.
+    fn highlighted_loadout(&self, cx: &App) -> Option<Uuid> {
+        let &ix = self.visible(cx).get(self.highlight)?;
+        let row = &self.rows[ix];
+        row.loadout.then_some(row.id)
+    }
+
+    /// Keys while the diff shows: move and toggle among missing skills, install, go back.
+    fn diff_key(&mut self, loadout: Uuid, key: &str, cx: &mut Context<Self>) -> bool {
+        let missing = self.state.read(cx).loadout_diff(loadout).missing;
+        match key {
+            "escape" => self.set_diff(None, cx),
+            "up" | "down" if !missing.is_empty() => {
+                let last = missing.len() - 1;
+                self.diff_highlight = if key == "up" {
+                    self.diff_highlight.saturating_sub(1)
+                } else {
+                    (self.diff_highlight + 1).min(last)
+                };
+                cx.notify();
+            }
+            "space" | "tab" => {
+                if let Some(id) = missing.get(self.diff_highlight)
+                    && !self.diff_selected.remove(id)
+                {
+                    self.diff_selected.insert(*id);
+                }
+                cx.notify();
+            }
+            "enter" => {
+                let ids: Vec<Uuid> = missing
+                    .into_iter()
+                    .filter(|id| self.diff_selected.contains(id))
+                    .collect();
+                self.state.update(cx, |state, cx| state.equip(&ids, cx));
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// ⌘S: name the selection as a loadout, typed in place of the search.
     fn start_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.chosen(cx).is_empty() {
@@ -394,6 +465,24 @@ impl Palette {
             cx.stop_propagation();
             return;
         }
+        // ⌘D compares the project with the highlighted loadout (U7); again goes back.
+        if modifiers.platform && key == "d" {
+            let loadout = if self.diff.is_some() {
+                None
+            } else {
+                self.highlighted_loadout(cx)
+            };
+            self.set_diff(loadout, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if let Some(loadout) = self.diff {
+            let plain = !(modifiers.platform || modifiers.control || modifiers.alt);
+            if plain && self.diff_key(loadout, key, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         // ⌘Y previews, like Quick Look in Finder; Esc leaves a preview before closing.
         if modifiers.platform && key == "y" {
             let highlighted = self
@@ -442,12 +531,14 @@ impl Palette {
         let id = row.id;
         let hover = theme.list_hover;
         let warning = theme.warning;
+        let is_loadout = row.loadout;
+        let this = cx.entity().downgrade();
         let icon = if selected {
             Icon::new(IconName::CircleCheck).text_color(theme.primary)
         } else {
             Icon::new(ExtraIcon::Circle).text_color(theme.muted_foreground)
         };
-        div()
+        let element = div()
             .id(("row", ix))
             .h(ROW_HEIGHT)
             .px_2()
@@ -473,10 +564,14 @@ impl Palette {
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
                     .cursor_pointer()
-                    // The name previews; the rest of the row toggles.
+                    // The name previews (a loadout's name shows its diff); the rest of the row toggles.
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        this.toggle_preview(Some(id), cx);
+                        if is_loadout {
+                            this.set_diff(Some(id), cx);
+                        } else {
+                            this.toggle_preview(Some(id), cx);
+                        }
                     }))
                     .child(row.name.clone()),
             )
@@ -508,12 +603,152 @@ impl Palette {
                         .small()
                         .text_color(theme.muted_foreground),
                 )
+            });
+        if !is_loadout {
+            return element.into_any_element();
+        }
+        element
+            .context_menu(move |menu, _, _| {
+                let this = this.clone();
+                menu.item(
+                    PopupMenuItem::new("Diff against loadout").on_click(move |_, _, cx| {
+                        this.update(cx, |this, cx| this.set_diff(Some(id), cx)).ok();
+                    }),
+                )
             })
             .into_any_element()
     }
 }
 
 impl Palette {
+    /// "Missing vs Web app (3)" rows to select, then installed ones and extras, muted.
+    fn render_diff(&self, loadout: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let state = self.state.read(cx);
+        let Some(name) = state.data.loadout(loadout).map(|l| l.name.clone()) else {
+            return Vec::new();
+        };
+        let diff = state.loadout_diff(loadout);
+        let favorite = |id: &Uuid| {
+            state
+                .data
+                .favorites
+                .iter()
+                .find(|f| f.id == *id)
+                .map(|f| (f.name.clone(), f.source.clone()))
+                .unwrap_or_default()
+        };
+        let missing: Vec<(Uuid, (String, String))> =
+            diff.missing.iter().map(|id| (*id, favorite(id))).collect();
+        let present: Vec<(String, String)> = diff.present.iter().map(favorite).collect();
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let label = |text: String| {
+            div()
+                .h(LABEL_HEIGHT)
+                .px_2()
+                .flex()
+                .items_center()
+                .text_size(px(11.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(muted)
+                .child(text)
+                .into_any_element()
+        };
+        let line = |name: String, trailing: String, icon: Option<Icon>| {
+            div()
+                .h(px(28.))
+                .px_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_color(muted)
+                .children(icon)
+                .child(div().text_size(px(13.)).truncate().child(name))
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .max_w(px(220.))
+                        .truncate()
+                        .text_size(px(11.))
+                        .child(trailing),
+                )
+                .into_any_element()
+        };
+        let mut items = Vec::new();
+        if missing.is_empty() {
+            items.push(label(format!(
+                "Nothing missing: this project has everything in {name}"
+            )));
+        } else {
+            items.push(label(format!("Missing vs {name} ({})", missing.len())));
+        }
+        for (ix, (id, (skill, source))) in missing.into_iter().enumerate() {
+            let selected = self.diff_selected.contains(&id);
+            let highlighted = ix == self.diff_highlight;
+            let theme = cx.theme();
+            let hover = theme.list_hover;
+            let icon = if selected {
+                Icon::new(IconName::CircleCheck).text_color(theme.primary)
+            } else {
+                Icon::new(ExtraIcon::Circle).text_color(theme.muted_foreground)
+            };
+            items.push(
+                div()
+                    .id(("missing", ix))
+                    .h(ROW_HEIGHT)
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(6.))
+                    .when(highlighted, |row| row.bg(theme.list_active))
+                    .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.diff_selected.remove(&id) {
+                            this.diff_selected.insert(id);
+                        }
+                        cx.notify();
+                    }))
+                    .child(icon.small())
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .truncate()
+                            .child(skill),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .max_w(px(220.))
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(theme.muted_foreground)
+                            .child(source),
+                    )
+                    .into_any_element(),
+            );
+        }
+        if !present.is_empty() {
+            items.push(label(format!("Installed ({})", present.len())));
+            items.extend(present.into_iter().map(|(skill, source)| {
+                line(skill, source, Some(Icon::new(IconName::Check).small()))
+            }));
+        }
+        if !diff.extra.is_empty() {
+            items.push(label(format!(
+                "Extra, not in {name} ({})",
+                diff.extra.len()
+            )));
+            items.extend(
+                diff.extra
+                    .into_iter()
+                    .map(|skill| line(skill, String::new(), None)),
+            );
+        }
+        items
+    }
+
     /// A favorite's source, findings, compatibility notes, files, and SKILL.md.
     fn render_preview(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
@@ -600,9 +835,10 @@ impl Render for Palette {
         self.highlight = self.highlight.min(visible.len().saturating_sub(1));
         let entries = self.entries(&visible);
         let stack_label = self.state.read(cx).stack_summary();
-        let rows: Vec<AnyElement> = match self.preview {
-            Some(id) => self.render_preview(id, cx),
-            None => entries
+        let rows: Vec<AnyElement> = match (self.diff, self.preview) {
+            (Some(loadout), _) => self.render_diff(loadout, cx),
+            (None, Some(id)) => self.render_preview(id, cx),
+            (None, None) => entries
                 .iter()
                 .map(|entry| match entry {
                     Entry::Label(section) => section_label(*section, &stack_label, cx),
@@ -636,6 +872,14 @@ impl Render for Palette {
             .filter(|r| !r.loadout && r.installed)
             .count();
         let installs = self.selected.len() - updates - loadouts.len();
+        let diff_count = self.diff.map(|loadout| {
+            let missing = self.state.read(cx).loadout_diff(loadout).missing;
+            missing
+                .iter()
+                .filter(|id| self.diff_selected.contains(id))
+                .count()
+        });
+        let loadout_highlighted = self.highlighted_loadout(cx).is_some();
         let empty = self.rows.is_empty();
 
         div()
@@ -682,12 +926,12 @@ impl Render for Palette {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .p(LIST_PADDING)
-                    .when(empty && self.preview.is_none(), |list| {
+                    .when(empty && self.preview.is_none() && self.diff.is_none(), |list| {
                         list.flex().items_center().px_3().text_size(px(12.)).text_color(theme.muted_foreground).child(
                             "No favorites yet. Paste a link or owner/repo in the menu bar popup.",
                         )
                     })
-                    .when(!empty && visible.is_empty() && self.preview.is_none(), |list| {
+                    .when(!empty && visible.is_empty() && self.preview.is_none() && self.diff.is_none(), |list| {
                         list.px_3().text_size(px(12.)).text_color(theme.muted_foreground).child("No matches")
                     })
                     .children(rows),
@@ -729,17 +973,23 @@ impl Render for Palette {
                     .gap_3()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(match (self.naming, status, notice.is_some()) {
-                        (true, _, _) => "↩ Save as loadout".into(),
-                        (false, Some(status), _) => status,
-                        (false, None, true) => "↩ Install anyway".into(),
-                        (false, None, false) => return_hint(installs, updates, &loadouts),
+                    .child(match (self.naming, status, notice.is_some(), diff_count) {
+                        (true, ..) => "↩ Save as loadout".into(),
+                        (false, Some(status), ..) => status,
+                        (false, None, true, _) => "↩ Install anyway".into(),
+                        (false, None, false, Some(0)) => "Nothing selected".into(),
+                        (false, None, false, Some(n)) => format!("↩ Install {n} missing").into(),
+                        (false, None, false, None) => return_hint(installs, updates, &loadouts),
                     })
                     .child(div().flex_1())
                     .child(if self.naming {
                         "esc cancel"
+                    } else if self.diff.is_some() {
+                        "↑↓ move · space select · esc back"
                     } else if self.preview.is_some() {
                         "⌘Y or esc closes preview"
+                    } else if loadout_highlighted {
+                        "↑↓ move · space select · ⌘D diff · esc close"
                     } else {
                         "↑↓ move · space select · ⌘S save as loadout · esc close"
                     }),

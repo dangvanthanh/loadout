@@ -332,3 +332,15 @@ agent… (an id or a name like "Claude Code", resolved against `agents.rs`; unkn
 it), Tags…, Remove.
 **Verified:** created "Web app" from a Next.js project, set its agent to "Pi", and applied it. Both skills
 installed with loadout-attributed entries and one apply entry.
+
+## 039 — Diff against loadout in the palette
+**Choice:** ⌘D on a highlighted loadout row, clicking its name, or right-click → "Diff against loadout" replaces the
+list with "Missing vs Web app (n)" (selectable, all pre-selected), then "Installed (n)" and "Extra, not in Web app
+(n)", muted. ↑↓ and Space or Tab work on the missing rows; Return installs the chosen ones through the usual equip
+path (safety glance included); Esc or ⌘D goes back. Present = Loadout's records or the project's lock file / agent
+folders (the same test as the ✓). Extra = names in the lock file or agent folders that no loadout skill accounts for
+(`Installed::matching`: a whole-source favorite covers every skill its repo installed). The diff is computed live,
+so installed skills move from Missing to Installed as they land. Global targets show no extras: only project folders
+are read.
+**Verified:** a project with `tdd` and an unrelated `notes` skill, against "Web app" (frontend-design + tdd), showed
+missing frontend-design, installed tdd, extra notes. Installing the missing one left nothing missing.

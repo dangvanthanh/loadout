@@ -68,6 +68,12 @@ fn repo_key(source: &str) -> Option<String> {
 
 impl Installed {
     pub fn contains(&self, favorite: &Favorite) -> bool {
+        !self.matching(favorite).is_empty()
+    }
+
+    /// The installed skill names `favorite` accounts for: its own skill, or for a whole source,
+    /// every skill the lock file attributes to that repo.
+    pub fn matching(&self, favorite: &Favorite) -> Vec<&str> {
         let wanted = repo_key(&favorite.source);
         let same_source = |source: &str| match (repo_key(source), &wanted) {
             (Some(a), Some(b)) => a == *b,
@@ -83,14 +89,17 @@ impl Installed {
             // A folder without a lock entry could be from anywhere; the name decides.
             Some(name) => self
                 .skills
-                .get(&updates::normalize(name))
-                .is_some_and(|source| source.as_deref().is_none_or(same_source)),
-            // A whole source: any skill the lock file attributes to it.
+                .get_key_value(&updates::normalize(name))
+                .filter(|(_, source)| source.as_deref().is_none_or(same_source))
+                .map(|(name, _)| name.as_str())
+                .into_iter()
+                .collect(),
             None => self
                 .skills
-                .values()
-                .flatten()
-                .any(|source| same_source(source)),
+                .iter()
+                .filter(|(_, source)| source.as_deref().is_some_and(same_source))
+                .map(|(name, _)| name.as_str())
+                .collect(),
         }
     }
 }

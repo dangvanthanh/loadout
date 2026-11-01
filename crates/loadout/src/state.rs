@@ -12,7 +12,7 @@ use loadout_core::model::{Added, Favorite, Pending, ProvenanceEntry, SavedState,
 use loadout_core::safety::{self, Report};
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
-use loadout_core::{agents, parser, project, provenance, storage, tags, ui_skills};
+use loadout_core::{agents, loadout_diff, parser, project, provenance, storage, tags, ui_skills};
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
 use crate::macos::login_item::{self, LoginItem};
@@ -804,6 +804,13 @@ impl AppState {
             self.save();
             cx.notify();
         }
+    }
+
+    /// The current target versus `loadout`: missing, present, extra.
+    pub fn loadout_diff(&self, loadout: Uuid) -> loadout_diff::LoadoutDiff {
+        loadout_diff::diff(&self.data, loadout, &self.target.installed, |id| {
+            self.is_installed_here(id)
+        })
     }
 
     /// "4 skills · prefers Pi" for loadout rows.
