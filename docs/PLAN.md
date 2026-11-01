@@ -118,7 +118,7 @@ Write provenance.
 Detect skills already present (lock file + agent folders) so the palette shows checkmarks and skips them.
 **Accept:** previously installed skills show as installed without Loadout having done the install.
 
-### [ ] T2.5 Context signals in the live app
+### [x] T2.5 Context signals in the live app (2026-10-31)
 Wire the context module into the palette ranking path (best-effort; graceful when signals are unavailable).
 **Accept:** with an editor open on relevant files, ranking improves vs stack-only.
 

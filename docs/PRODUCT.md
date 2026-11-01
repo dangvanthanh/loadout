@@ -71,10 +71,10 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Provenance log model (U8)
 
 ### M2 — The loop: "equip this project" (U1, U2, U6)
-- ⬜ Palette: detected project + stack, favorites with suggestions pre-selected and ranked, Return installs
+- ✅ Palette: detected project + stack, favorites with suggestions pre-selected and ranked, Return installs
 - ✅ Favorites: paste to add (any format), tags, rename, remove
 - ✅ Installed state per project (incl. skills installed before Loadout)
-- ⬜ Context signals for ranking (recent files / open editors when available)
+- ✅ Context signals for ranking (recent files / open editors when available)
 
 ### M3 — Calm updates and trust (U3, U4, U8)
 - ⬜ Update check, Update pill, notification, filled menu bar icon

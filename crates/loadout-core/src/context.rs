@@ -47,7 +47,11 @@ pub fn gather(root: &Path, document: Option<&Path>) -> Context {
     }
     let changed = git_changes(root);
     let dirty = !changed.is_empty();
-    files.extend(changed.into_iter().filter(|f| !skipped(Path::new(f))));
+    files.extend(
+        changed
+            .into_iter()
+            .filter(|f| !in_skipped_dir(Path::new(f))),
+    );
     files.extend(recent_files(root));
 
     let mut seen = std::collections::HashSet::new();
@@ -85,7 +89,7 @@ fn recent_files(root: &Path) -> Vec<String> {
             let path = entry.path();
             let Ok(meta) = entry.metadata() else { continue };
             if meta.is_dir() {
-                if depth < MAX_DEPTH && !skipped(Path::new(&entry.file_name())) {
+                if depth < MAX_DEPTH && !is_skipped_dir(&entry.file_name()) {
                     stack.push((path, depth + 1));
                 }
             } else if let Ok(modified) = meta.modified() {
@@ -102,9 +106,17 @@ fn recent_files(root: &Path) -> Vec<String> {
         .collect()
 }
 
-fn skipped(path: &Path) -> bool {
-    path.components()
-        .any(|c| SKIP_DIRS.iter().any(|skip| c.as_os_str() == *skip))
+/// Whether a file sits inside a folder `is_skipped_dir` rejects.
+fn in_skipped_dir(path: &Path) -> bool {
+    path.parent()
+        .is_some_and(|dir| dir.components().any(|c| is_skipped_dir(c.as_os_str())))
+}
+
+/// Build output, dependencies, and hidden tool folders (`.claude/skills` holds installed skills,
+/// not the user's work). `.github` stays: CI config is a signal.
+fn is_skipped_dir(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    SKIP_DIRS.contains(&name.as_ref()) || (name.starts_with('.') && name != ".github")
 }
 
 /// `git status --porcelain` lines → paths (rename targets for `R  old -> new`).
@@ -241,6 +253,11 @@ mod tests {
         std::fs::write(root.join("node_modules/pkg/index.test.js"), "").unwrap();
         std::fs::write(root.join("src/app.tsx"), "").unwrap();
         std::fs::write(root.join("schema.sql"), "").unwrap();
+        // Installed skills and tool folders aren't the user's work; CI config is.
+        std::fs::create_dir_all(root.join(".claude/skills/x")).unwrap();
+        std::fs::write(root.join(".claude/skills/x/SKILL.md"), "").unwrap();
+        std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        std::fs::write(root.join(".github/workflows/ci.yml"), "").unwrap();
         let git = |args: &[&str]| {
             Command::new("git")
                 .args(args)
@@ -261,6 +278,16 @@ mod tests {
         );
         assert!(
             !ctx.files.iter().any(|f| f.contains("node_modules")),
+            "{:?}",
+            ctx.files
+        );
+        assert!(
+            !ctx.files.iter().any(|f| f.starts_with(".claude")),
+            "{:?}",
+            ctx.files
+        );
+        assert!(
+            ctx.files.contains(&".github/workflows/ci.yml".to_string()),
             "{:?}",
             ctx.files
         );

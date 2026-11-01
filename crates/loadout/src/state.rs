@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use gpui_kit::*;
+use loadout_core::context::{self as signals, Context as Signals};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
 use loadout_core::model::{Added, Favorite, SavedState, Uuid};
@@ -26,6 +27,17 @@ pub struct Target {
     pub stack: Vec<StackTag>,
     /// Skills already in the project, from its lock file and agent folders.
     pub installed: Installed,
+    /// Open file, git changes, recent files: a ranking boost (U2).
+    pub signals: Signals,
+}
+
+/// Everything detection learns off the main thread.
+struct Resolved {
+    detection: Detection,
+    root: Option<PathBuf>,
+    stack: Vec<StackTag>,
+    installed: Installed,
+    signals: Signals,
 }
 
 pub struct AppState {
@@ -309,45 +321,52 @@ impl AppState {
                 let detection = app
                     .as_ref()
                     .map_or(Detection::Unsupported, frontmost::detect);
-                let root = match &detection {
-                    Detection::Folder(folder) => Some(project::root_for(folder)),
-                    _ => fallback,
+                let (root, document) = match &detection {
+                    Detection::Folder { folder, document } => {
+                        (Some(project::root_for(folder)), document.clone())
+                    }
+                    _ => (fallback, None),
                 };
-                let stack = root.as_deref().map(stack::detect).unwrap_or_default();
-                let installed = root
-                    .as_deref()
-                    .map(|root| installed::read(root, &agent_ids))
-                    .unwrap_or_default();
-                (detection, root, stack, installed)
+                let Some(dir) = root.as_deref() else {
+                    return Resolved {
+                        detection,
+                        root,
+                        stack: Vec::new(),
+                        installed: Installed::default(),
+                        signals: Signals::default(),
+                    };
+                };
+                Resolved {
+                    stack: stack::detect(dir),
+                    installed: installed::read(dir, &agent_ids),
+                    signals: signals::gather(dir, document.as_deref()),
+                    detection,
+                    root,
+                }
             }
         });
         // Replacing the task cancels a detection still running for an earlier palette.
         self._detect = Some(cx.spawn(async move |this, cx| {
-            let (detection, root, stack, installed) = task.await;
+            let resolved = task.await;
             this.update(cx, |this, cx| {
-                this.apply_detection(app.as_ref(), detection, root, stack);
-                this.target.installed = installed;
+                this.apply_detection(app.as_ref(), resolved);
                 cx.notify();
             })
             .ok();
         }));
     }
 
-    fn apply_detection(
-        &mut self,
-        app: Option<&FrontApp>,
-        detection: Detection,
-        root: Option<PathBuf>,
-        stack: Vec<StackTag>,
-    ) {
+    fn apply_detection(&mut self, app: Option<&FrontApp>, resolved: Resolved) {
         let app_name = app.map_or_else(String::new, |app| app.name.clone());
         self.target = Target {
-            root,
-            stack,
+            root: resolved.root,
+            stack: resolved.stack,
+            installed: resolved.installed,
+            signals: resolved.signals,
             ..Default::default()
         };
-        match detection {
-            Detection::Folder(_) => {
+        match resolved.detection {
+            Detection::Folder { .. } => {
                 self.target.from_app = Some(app_name);
                 if let Some(root) = self.target.root.clone() {
                     self.remember_project(&root);

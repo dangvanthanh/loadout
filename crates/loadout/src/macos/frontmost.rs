@@ -30,7 +30,11 @@ pub struct FrontApp {
 
 #[derive(Debug)]
 pub enum Detection {
-    Folder(PathBuf),
+    Folder {
+        folder: PathBuf,
+        /// The open file, when the app reported one (editors); a context signal.
+        document: Option<PathBuf>,
+    },
     NeedsAutomation,
     NeedsAccessibility,
     /// The app doesn't expose a folder (or isn't showing one right now).
@@ -65,10 +69,16 @@ pub fn detect(app: &FrontApp) -> Detection {
     if !ax_trusted() {
         return Detection::NeedsAccessibility;
     }
-    ax_document(app.pid)
-        .and_then(|doc| path_from_document(&doc))
-        .and_then(|path| folder_for(&path))
-        .map_or(Detection::Unsupported, Detection::Folder)
+    let Some(path) = ax_document(app.pid).and_then(|doc| path_from_document(&doc)) else {
+        return Detection::Unsupported;
+    };
+    match folder_for(&path) {
+        Some(folder) => Detection::Folder {
+            document: path.is_file().then_some(path),
+            folder,
+        },
+        None => Detection::Unsupported,
+    }
 }
 
 fn finder_folder() -> Detection {
@@ -92,7 +102,10 @@ fn finder_folder() -> Detection {
     let path = String::from_utf8_lossy(&output.stdout);
     path_from_document(path.trim())
         .and_then(|path| folder_for(&path))
-        .map_or(Detection::Unsupported, Detection::Folder)
+        .map_or(Detection::Unsupported, |folder| Detection::Folder {
+            folder,
+            document: None,
+        })
 }
 
 type AXUIElementRef = CFTypeRef;

@@ -5,7 +5,6 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use loadout_core::context::Context as SignalContext;
 use loadout_core::model::Uuid;
 use loadout_core::tags;
 
@@ -111,8 +110,7 @@ impl Palette {
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let favorites = &state.data.favorites;
-        let ranked =
-            tags::rank_favorites(favorites, &state.target.stack, &SignalContext::default());
+        let ranked = tags::rank_favorites(favorites, &state.target.stack, &state.target.signals);
         self.rows = ranked
             .iter()
             .map(|s| {

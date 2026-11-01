@@ -229,3 +229,11 @@ installed when its normalized name is there and the lock's source, if any, is th
 favorite is installed when the lock attributes any skill to that repo. Loadout's own `installed` records also count.
 The palette shows a muted ✓, never pre-selects or toggles those rows, and Return skips them. The set is read with
 detection (background) and again after each install batch. Global installs rely on records only for now.
+
+## 030 — Context in the live palette
+**Choice:** Detection keeps the editor's open file (`Detection::Folder { folder, document }`), and the same
+background task runs `context::gather(root, document)` next to stack and installed detection. The palette ranks
+with it: context lifts items into Suggested but never pre-selects them. Hidden folders except `.github` are skipped
+when gathering, so installed skills (`.claude/skills/…`) and tool folders don't read as the user's work.
+**Verified:** in a git project with a changed `tests/login.spec.ts`, a `nextjs` favorite ranked first (stack,
+pre-selected), `tdd` second (context "testing", not pre-selected), and an untagged favorite last.
