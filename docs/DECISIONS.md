@@ -159,3 +159,12 @@ would prompt. Agent lists split on commas or whitespace, as in the prototype.
 **Verified:** `npx -y skills add 'anthropics/skills' --skill 'frontend-design' -a 'claude-code' -y` in a temp dir
 exited 0 and wrote `.claude/skills/frontend-design/` and `skills-lock.json` (`skills` → name → `source`,
 `sourceType`, `skillPath`, `computedHash`).
+
+## 023 — Project root and stack rules
+**Choice:** `project::find_root` walks up from the detected folder. The nearest `.git` (folder or worktree file)
+wins, then the nearest manifest (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `*.xcodeproj`, …), then
+the folder itself. The home folder and its ancestors never count, so a dotfiles repo in `~` doesn't capture
+everything. `stack::detect` reads root manifests only: package.json dependency keys, Cargo dependency sections
+(line scan, no toml crate), whole-word package names in Python manifests, plus go.mod / Gemfile / composer.json /
+pubspec.yaml / Package.swift / Dockerfile. Order is fixed per ecosystem (frameworks and libraries, then the
+language), so ranking can rely on it. Each tag carries its evidence ("next in package.json").

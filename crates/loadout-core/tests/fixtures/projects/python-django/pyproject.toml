@@ -1,0 +1,3 @@
+[project]
+name = "blog"
+dependencies = ["Django>=5.1", "djangorestframework", "psycopg[binary]"]

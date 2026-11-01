@@ -66,7 +66,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 
 ### M1 — Core library (no UI, fully tested)
 - ⬜ Model + storage, paste parser, installer, update checker
-- ⬜ Project root finder + stack detector (U1, U2)
+- ✅ Project root finder + stack detector (U1, U2)
 - ⬜ Diff, safety + compatibility scanner (U3, U4)
 - ⬜ Provenance log model (U8)
 

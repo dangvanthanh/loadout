@@ -1,0 +1,11 @@
+[package]
+name = "editor"
+version = "0.1.0"
+
+[dependencies]
+gpui-kit = "=0.8.1"
+serde = { version = "1", features = ["derive"] }
+tokio.workspace = true
+
+[dev-dependencies]
+insta = "1"

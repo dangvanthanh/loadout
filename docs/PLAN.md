@@ -79,7 +79,7 @@ ui-skills from a saved HTML fixture.
 streaming and ANSI stripping. Missing `npx` → typed error.
 **Accept:** installer unit tests green; a manual dry-run against a temp dir works.
 
-### [ ] T1.4 Project root + stack detector (U1, U2)
+### [x] T1.4 Project root + stack detector (U1, U2) (2026-10-31)
 `project.rs`, `stack.rs`. Walk up for `.git` / `package.json` / `Cargo.toml` / etc. Detect common stacks with evidence.
 **Accept:** fixture projects produce the expected root and stack tags.
 

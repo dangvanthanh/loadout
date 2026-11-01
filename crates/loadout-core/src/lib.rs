@@ -5,5 +5,6 @@ pub mod installer;
 pub mod model;
 pub mod parser;
 pub mod project;
+pub mod stack;
 pub mod storage;
 pub mod ui_skills;

@@ -31,6 +31,56 @@ pub fn folder_for(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Files that mark a project root when there's no `.git`.
+const MANIFESTS: &[&str] = &[
+    "package.json",
+    "Cargo.toml",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "Gemfile",
+    "composer.json",
+    "Package.swift",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "deno.json",
+    "mix.exs",
+    "pubspec.yaml",
+    "skills-lock.json",
+];
+
+/// The project root for a folder: the nearest ancestor with `.git`, else the nearest with a
+/// manifest, else the folder itself. `home` and its ancestors never count, so a dotfiles
+/// repo in `~` doesn't swallow every folder.
+pub fn find_root(start: &Path, home: Option<&Path>) -> PathBuf {
+    let mut manifest = None;
+    for dir in start.ancestors() {
+        if home.is_some_and(|home| home.starts_with(dir)) {
+            break;
+        }
+        if dir.join(".git").exists() {
+            return dir.to_path_buf();
+        }
+        if manifest.is_none() && has_manifest(dir) {
+            manifest = Some(dir.to_path_buf());
+        }
+    }
+    manifest.unwrap_or_else(|| start.to_path_buf())
+}
+
+fn has_manifest(dir: &Path) -> bool {
+    MANIFESTS.iter().any(|name| dir.join(name).exists())
+        || std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "xcodeproj")
+            })
+        })
+}
+
 fn percent_decode(s: &str) -> Option<String> {
     let mut bytes = Vec::with_capacity(s.len());
     let mut rest = s.as_bytes();
@@ -82,6 +132,77 @@ mod tests {
         assert_eq!(path_from_document(""), None);
         assert_eq!(path_from_document("file:///a/%ZZ"), None);
         assert_eq!(path_from_document("file:///a/%FF"), None);
+    }
+
+    /// A fresh temp tree (canonical, so it compares equal to walked paths).
+    fn tree(name: &str, dirs: &[&str], files: &[&str]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("loadout-root-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        for dir in dirs {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for file in files {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn root_is_nearest_git_over_nested_manifests() {
+        let t = tree(
+            "git",
+            &["repo/.git", "repo/packages/app/src"],
+            &["repo/packages/app/package.json"],
+        );
+        assert_eq!(
+            find_root(&t.join("repo/packages/app/src"), None),
+            t.join("repo")
+        );
+        // A worktree or submodule has a `.git` file instead of a folder.
+        let w = tree("worktree", &["wt/src"], &["wt/.git"]);
+        assert_eq!(find_root(&w.join("wt/src"), None), w.join("wt"));
+    }
+
+    #[test]
+    fn root_without_git_is_nearest_manifest() {
+        let t = tree(
+            "manifest",
+            &["app/src/components", "ios/App.xcodeproj/x"],
+            &["app/Cargo.toml"],
+        );
+        assert_eq!(
+            find_root(&t.join("app/src/components"), None),
+            t.join("app")
+        );
+        assert_eq!(find_root(&t.join("ios"), None), t.join("ios"));
+    }
+
+    #[test]
+    fn root_without_markers_is_the_folder() {
+        let t = tree("plain", &["notes/2026"], &[]);
+        assert_eq!(find_root(&t.join("notes/2026"), None), t.join("notes/2026"));
+    }
+
+    #[test]
+    fn root_ignores_dotfiles_repo_in_home() {
+        let home = tree(
+            "home",
+            &[".git", "Code/notes", "Code/shop/src"],
+            &["Code/shop/package.json"],
+        );
+        assert_eq!(
+            find_root(&home.join("Code/notes"), Some(&home)),
+            home.join("Code/notes")
+        );
+        assert_eq!(
+            find_root(&home.join("Code/shop/src"), Some(&home)),
+            home.join("Code/shop")
+        );
+        assert_eq!(find_root(&home, Some(&home)), home);
     }
 
     #[test]
