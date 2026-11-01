@@ -178,7 +178,13 @@ impl AppState {
     /// Installs `ids` into the current target with `npx skills add`, one after another, off the
     /// main thread. Skips favorites already installed there. Output streams into `log`.
     pub fn install(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
-        if self.installing {
+        if self.installing || ids.is_empty() {
+            return;
+        }
+        // The Into line may still show the fallback project; never install there by accident.
+        if self.target.detecting {
+            self.install_status = Some("Finding the project…".into());
+            cx.notify();
             return;
         }
         let global = self.data.settings.global;
@@ -358,6 +364,10 @@ impl AppState {
 
     fn apply_detection(&mut self, app: Option<&FrontApp>, resolved: Resolved) {
         let app_name = app.map_or_else(String::new, |app| app.name.clone());
+        if !self.installing {
+            // Clears "Finding the project…" from a Return pressed during detection.
+            self.install_status = None;
+        }
         self.target = Target {
             root: resolved.root,
             stack: resolved.stack,

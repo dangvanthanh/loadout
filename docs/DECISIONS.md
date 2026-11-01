@@ -237,3 +237,8 @@ with it: context lifts items into Suggested but never pre-selects them. Hidden f
 when gathering, so installed skills (`.claude/skills/…`) and tool folders don't read as the user's work.
 **Verified:** in a git project with a changed `tests/login.spec.ts`, a `nextjs` favorite ranked first (stack,
 pre-selected), `tdd` second (context "testing", not pre-selected), and an untagged favorite last.
+
+## 031 — No install while the target is still being detected
+**Choice:** `AppState::install` refuses while detection runs and shows "Finding the project…", which clears when
+detection lands. A fast ⌃⌥L + Return would otherwise install into the fallback (last used) project shown before
+detection finished. An empty selection on an empty list does nothing. Found in the M2 self-review.
