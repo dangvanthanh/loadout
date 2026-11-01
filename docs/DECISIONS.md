@@ -306,3 +306,12 @@ palette. The palette list is now 4–7 rows high so a preview fits.
 **Verified:** a real first install of `anthropics/skills@pdf` showed "Checking the skill…", then the scripts notice;
 Return again installed it, and it no longer counts as a first install. `curl … | sh` detection is covered by core
 tests; no public skill I checked uses it.
+
+## 037 — History in the popup
+**Choice:** ⚙ → History opens provenance in the popup's list area, newest first (up to 200 lines, 10 px monospace):
+"Updated frontend-design in shop · d79e2a5 · 2 hours ago". A "This project" / "All projects" toggle filters by the
+last detected project. A row's right-click → History shows that skill only. `provenance::describe` builds each line
+and is tested; short SHAs appear only for real tree SHAs. Remove entries arrive with uninstall (T5.4); the view
+already words them ("Removed tdd from blog").
+**Verified:** the History view rendered from a real `data.json`, and its line matched the stored entry (action,
+skill, project, tree SHA).

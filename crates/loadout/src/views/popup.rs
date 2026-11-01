@@ -6,7 +6,8 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, The
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::diff::{ChangeKind, LineKind};
-use loadout_core::model::Uuid;
+use loadout_core::model::{ProvenanceEntry, Uuid};
+use loadout_core::provenance;
 
 use crate::Quit;
 use crate::macos::login_item::LoginItem;
@@ -58,7 +59,20 @@ enum View {
     Output,
     /// A pending update's files and SKILL.md diff.
     Changes(Uuid),
+    /// Provenance, newest first.
+    History(HistoryFilter),
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HistoryFilter {
+    All,
+    /// The project last detected.
+    Project,
+    Skill(Uuid),
+}
+
+/// Most history lines shown.
+const HISTORY_LINES: usize = 200;
 
 pub struct Popup {
     state: Entity<AppState>,
@@ -305,6 +319,7 @@ impl Popup {
                     if pinned { "Unpin" } else { "Pin" },
                     RowAction::Pin(!pinned),
                 ))
+                .item(menu_item("History", RowAction::History))
                 .separator()
                 .item(menu_item("Rename…", RowAction::Edit(Field::Name)))
                 .item(menu_item("Tags…", RowAction::Edit(Field::Tags)))
@@ -323,6 +338,7 @@ impl Popup {
     ) {
         match action {
             RowAction::Changes => self.set_view(View::Changes(id), cx),
+            RowAction::History => self.set_view(View::History(HistoryFilter::Skill(id)), cx),
             RowAction::Pin(pinned) => self
                 .state
                 .update(cx, |state, cx| state.set_pinned(id, pinned, cx)),
@@ -477,9 +493,107 @@ impl Popup {
     }
 }
 
+impl Popup {
+    /// Back, a title, the project toggle, and one line per entry.
+    fn render_history(&self, filter: HistoryFilter, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let theme = cx.theme();
+        let state = self.state.read(cx);
+        let project = state
+            .data
+            .selected_project_id
+            .and_then(|id| state.data.projects.iter().find(|p| p.id == id))
+            .map(|p| p.path.clone());
+        let skill = match filter {
+            HistoryFilter::Skill(id) => state.data.favorites.iter().find(|f| f.id == id),
+            _ => None,
+        };
+        let entries: Vec<&ProvenanceEntry> = match (filter, &project, skill) {
+            (HistoryFilter::Skill(_), _, Some(favorite)) => {
+                provenance::for_skill(&state.data.provenance, favorite)
+            }
+            (HistoryFilter::Project, Some(path), _) => {
+                provenance::for_project(&state.data.provenance, path)
+            }
+            _ => provenance::recent(&state.data.provenance, usize::MAX),
+        };
+        let title: SharedString = match (filter, &project, skill) {
+            (HistoryFilter::Skill(_), _, Some(favorite)) => {
+                format!("History · {}", favorite.name).into()
+            }
+            (HistoryFilter::Project, Some(path), _) => format!(
+                "History · {}",
+                path.file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            )
+            .into(),
+            _ => "History".into(),
+        };
+        let toggle = match (filter, project.is_some()) {
+            (HistoryFilter::All, true) => Some(("This project", HistoryFilter::Project)),
+            (HistoryFilter::Project, _) => Some(("All projects", HistoryFilter::All)),
+            _ => None,
+        };
+        let now = provenance::now();
+        let mut items = vec![
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    Button::new("back")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::ArrowLeft)
+                        .tooltip("Back")
+                        .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Favorites, cx))),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(title),
+                )
+                .when_some(toggle, |row, (label, next)| {
+                    row.child(
+                        Button::new("history-filter")
+                            .ghost()
+                            .xsmall()
+                            .label(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_view(View::History(next), cx)
+                            })),
+                    )
+                })
+                .into_any_element(),
+        ];
+        if entries.is_empty() {
+            items.push(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child("Nothing yet. Installs and updates show up here.")
+                    .into_any_element(),
+            );
+        }
+        items.extend(entries.into_iter().take(HISTORY_LINES).map(|entry| {
+            div()
+                .py(px(1.))
+                .font_family("Menlo")
+                .text_size(px(10.))
+                .child(provenance::describe(entry, now))
+                .into_any_element()
+        }));
+        items
+    }
+}
+
 #[derive(Clone, Copy)]
 enum RowAction {
     Changes,
+    History,
     Pin(bool),
     Edit(Field),
     Remove,
@@ -492,6 +606,7 @@ impl Render for Popup {
             View::Favorites => (0..count).map(|ix| self.render_favorite(ix, cx)).collect(),
             View::Output => Vec::new(),
             View::Changes(id) => self.render_changes(id, cx),
+            View::History(filter) => self.render_history(filter, cx),
         };
         let theme = cx.theme();
         let state = self.state.read(cx);
@@ -506,6 +621,7 @@ impl Render for Popup {
             .clone()
             .or_else(|| state.install_status.clone());
         let has_log = !state.log.is_empty();
+        let has_history = !state.data.provenance.is_empty();
         let log: Vec<SharedString> = if self.view == View::Output {
             state.log.clone()
         } else {
@@ -635,9 +751,18 @@ impl Render for Popup {
                                 let this = cx.entity().downgrade();
                                 move |menu, _, _| {
                                     let item = |label: &'static str| PopupMenuItem::new(label);
-                                    let this = this.clone();
+                                    let (this, history) = (this.clone(), this.clone());
                                     let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
-                                    menu.when(has_log, |menu| {
+                                    menu.when(has_history, |menu| {
+                                        menu.item(item("History").on_click(move |_, _, cx| {
+                                            history
+                                                .update(cx, |this, cx| {
+                                                    this.set_view(View::History(HistoryFilter::All), cx)
+                                                })
+                                                .ok();
+                                        }))
+                                    })
+                                    .when(has_log, |menu| {
                                         menu.item(item("Output").on_click(move |_, _, cx| {
                                             this.update(cx, |this, cx| this.set_view(View::Output, cx)).ok();
                                         }))

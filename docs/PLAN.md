@@ -138,7 +138,7 @@ Show file list + SKILL.md diff before updating. Pin version or ignore this updat
 On first install of a skill, show findings. Preview skill content.
 **Accept:** a skill with a `curl | sh` pattern shows a warning; install is still allowed.
 
-### [ ] T3.4 Provenance visible
+### [x] T3.4 Provenance visible (2026-11-01)
 Simple log view in the popup (or a dedicated sheet). Filter by project optional.
 **Accept:** recent installs appear; data matches what was written.
 

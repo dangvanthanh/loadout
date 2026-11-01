@@ -31,6 +31,40 @@ pub fn ago(then: u64, now: u64) -> String {
     format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
 }
 
+/// One line for the history view: "Updated frontend-design in shop · d79e2a5 · 2 hours ago".
+pub fn describe(entry: &ProvenanceEntry, now: u64) -> String {
+    let verb = match entry.action.as_str() {
+        INSTALL => "Installed",
+        UPDATE => "Updated",
+        REMOVE => "Removed",
+        APPLY_LOADOUT => "Applied",
+        other => other,
+    };
+    let what = entry.skill_name.as_deref().unwrap_or(&entry.skill_source);
+    let place = entry
+        .project_path
+        .as_deref()
+        .map(|p| {
+            Path::new(p)
+                .file_name()
+                .map_or(p.to_string(), |n| n.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "Global".to_string());
+    let preposition = if entry.action == REMOVE { "from" } else { "in" };
+    let mut parts = vec![format!("{verb} {what} {preposition} {place}")];
+    // Short tree SHAs only; synthetic versions and "?" say nothing useful here.
+    if let Some(sha) = entry
+        .tree_sha
+        .as_deref()
+        .filter(|v| crate::updates::is_tree_sha(v))
+    {
+        parts.push(sha[..7].to_string());
+    }
+    parts.extend(entry.note.clone());
+    parts.push(ago(entry.ts, now));
+    parts.join(" · ")
+}
+
 /// A new entry for `favorite`; set `tree_sha`, `agent`, `loadout_id`, `note` as known.
 /// `project` is `None` for global installs.
 pub fn entry(action: &str, project: Option<&Path>, favorite: &Favorite) -> ProvenanceEntry {
@@ -114,6 +148,46 @@ mod tests {
         append(&mut state, at(entry(UPDATE, Some(shop), &fd), 300));
         append(&mut state, at(entry(REMOVE, None, &tdd), 300));
         (state, fd, tdd)
+    }
+
+    #[test]
+    fn describes_entries() {
+        let fd = favorite(
+            "frontend-design",
+            "anthropics/skills",
+            Some("frontend-design"),
+        );
+        let now = 1_800_000_000;
+        let mut e = at(
+            entry(UPDATE, Some(Path::new("/Users/me/Code/shop")), &fd),
+            now - 7200,
+        );
+        e.tree_sha = Some("d79e2a5bb4df4a386c2adcdd9ab8709bba28c3f6".into());
+        assert_eq!(
+            describe(&e, now),
+            "Updated frontend-design in shop · d79e2a5 · 2 hours ago"
+        );
+
+        let whole = favorite("skills", "anthropics/skills", None);
+        let e = at(entry(INSTALL, None, &whole), now);
+        assert_eq!(
+            describe(&e, now),
+            "Installed anthropics/skills in Global · just now"
+        );
+
+        let mut e = at(entry(REMOVE, Some(Path::new("/p/blog")), &fd), now - 86_400);
+        e.tree_sha = Some("?".into());
+        assert_eq!(
+            describe(&e, now),
+            "Removed frontend-design from blog · 1 day ago"
+        );
+
+        let mut e = at(entry("future_action", None, &fd), now);
+        e.note = Some("from Web app".into());
+        assert_eq!(
+            describe(&e, now),
+            "future_action frontend-design in Global · from Web app · just now"
+        );
     }
 
     #[test]
