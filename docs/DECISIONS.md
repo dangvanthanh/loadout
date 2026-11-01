@@ -278,3 +278,16 @@ automatic checks, open at login, test notification, and Quit moved into the ⚙ 
 list area is now 4–7 rows high so other views fit in it.
 **Verified:** with real GitHub, a stale recorded version surfaced as one pending update; Update all re-ran the CLI and
 recorded the current tree SHA and an `update` entry. README-only vs folder changes are covered by core tests (T1.6).
+
+## 035 — What changed, pin, and ignore
+**Choice:** The Update pill (and "What changed" in the row's right-click menu) opens a view in the popup's list area:
+where the skill is behind, Update / Ignore this update / Pin, then the changed files (+ − ~) and a SKILL.md diff with
+2 lines of context. It costs four API requests: the folder listing at each version (both are tree SHAs) and two
+SKILL.md blobs, read only when SKILL.md changed. The result is kept while the same update is shown again. Versions
+that aren't tree SHAs (whole-repo favorites, root skills; DECISIONS 025) get a sentence instead of a file list; Update,
+Ignore, and Pin still work. When several projects are behind at different versions, the diff starts from the first
+recorded one. Pin = stay on the installed version (no pill, dot, or notification) until Unpin. Ignore = hide this
+version only; a newer one surfaces again. Both persist in `skillState` keyed by source@skill, so they survive
+removing and re-adding the favorite. Pinned rows show a muted pin. Esc leaves the view before it closes the popup.
+**Verified:** with `frontend-design` recorded at an older tree SHA, the view listed SKILL.md as modified with its
+real diff. Pin, unpin, and ignore changed the pending set as expected, and `ignoredVersion` was written to disk.

@@ -4,7 +4,7 @@ use gpui_kit::assets::Assets;
 use gpui_kit::{AssetSource, Result, SharedString};
 
 // Icons beyond GPUI Kit's default set.
-gpui_kit::assets::icon_assets!(ExtraIcons, [Circle, Sparkles]);
+gpui_kit::assets::icon_assets!(ExtraIcons, [Circle, Sparkles, Pin, ShieldAlert]);
 
 pub struct AppAssets;
 

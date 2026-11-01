@@ -32,6 +32,39 @@ pub struct DiffLine {
     pub text: String,
 }
 
+/// What changed in a skill folder between two versions.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    pub files: Vec<FileChange>,
+    /// SKILL.md line diff; empty when SKILL.md didn't change.
+    pub skill_md: Vec<DiffLine>,
+}
+
+/// Unchanged lines kept around each SKILL.md change.
+const CONTEXT_LINES: usize = 2;
+
+/// Files and SKILL.md diff between two listings of the same folder. `blob` reads a file's text
+/// by blob SHA; it's only called when SKILL.md changed.
+pub fn skill_changes<E>(
+    old: &Tree,
+    new: &Tree,
+    mut blob: impl FnMut(&str) -> Result<String, E>,
+) -> Result<Changes, E> {
+    let files = file_changes(old, new);
+    let skill_md = match files.iter().find(|f| f.path == "SKILL.md") {
+        Some(_) => {
+            let mut read = |tree: &Tree| match tree.blobs.get("SKILL.md") {
+                Some(sha) => blob(sha),
+                None => Ok(String::new()),
+            };
+            let (before, after) = (read(old)?, read(new)?);
+            line_diff(&before, &after, CONTEXT_LINES)
+        }
+        None => Vec::new(),
+    };
+    Ok(Changes { files, skill_md })
+}
+
 /// Compares two listings of the same folder (each fetched at that folder's tree SHA).
 /// Sorted by path.
 pub fn file_changes(old: &Tree, new: &Tree) -> Vec<FileChange> {
@@ -142,6 +175,64 @@ mod tests {
                 (LineKind::Context, "h"),
                 (LineKind::Added, "i"),
             ]
+        );
+    }
+
+    #[test]
+    fn skill_changes_reads_skill_md_only_when_it_changed() {
+        let old = tree(&[("SKILL.md", "s1"), ("ref.md", "r1")]);
+        let new = tree(&[
+            ("SKILL.md", "s2"),
+            ("ref.md", "r1"),
+            ("scripts/run.sh", "n"),
+        ]);
+        let mut reads = Vec::new();
+        let changes = skill_changes(&old, &new, |sha| {
+            reads.push(sha.to_string());
+            Ok::<_, ()>(match sha {
+                "s1" => "# Skill\nold rule\n".to_string(),
+                _ => "# Skill\nnew rule\n".to_string(),
+            })
+        })
+        .unwrap();
+        assert_eq!(reads, ["s1", "s2"]);
+        assert_eq!(changes.files.len(), 2);
+        let kinds: Vec<_> = changes.skill_md.iter().map(|l| l.kind).collect();
+        assert_eq!(
+            kinds,
+            [LineKind::Context, LineKind::Removed, LineKind::Added]
+        );
+
+        let unchanged = tree(&[("SKILL.md", "s1"), ("ref.md", "r2")]);
+        let changes = skill_changes(&old, &unchanged, |_| -> Result<String, ()> {
+            panic!("no reads")
+        })
+        .unwrap();
+        assert!(changes.skill_md.is_empty());
+        assert_eq!(
+            changes.files,
+            [FileChange {
+                path: "ref.md".into(),
+                kind: ChangeKind::Modified
+            }]
+        );
+    }
+
+    #[test]
+    fn skill_changes_new_skill_md_and_errors() {
+        let old = tree(&[("README.md", "r")]);
+        let new = tree(&[("README.md", "r"), ("SKILL.md", "s")]);
+        let changes = skill_changes(&old, &new, |_| Ok::<_, ()>("line\n".to_string())).unwrap();
+        assert_eq!(
+            changes.skill_md,
+            [DiffLine {
+                kind: LineKind::Added,
+                text: "line".into()
+            }]
+        );
+        assert_eq!(
+            skill_changes(&old, &new, |_| Err::<String, _>("offline")),
+            Err("offline")
         );
     }
 

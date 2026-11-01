@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use gpui_kit::*;
 use loadout_core::context::{self as signals, Context as Signals};
+use loadout_core::diff::{self, Changes};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
 use loadout_core::model::{Added, Favorite, Pending, SavedState, Uuid};
@@ -64,13 +65,33 @@ pub struct AppState {
     /// Unix seconds.
     pub last_checked: Option<u64>,
     pub check_error: Option<SharedString>,
+    /// What changed in the update the popup is showing.
+    pub what_changed: Option<WhatChanged>,
     _detect: Option<Task<()>>,
+    _changes: Option<Task<()>>,
     _resolve: Option<Task<()>>,
     _install: Option<Task<()>>,
     _check: Option<Task<()>>,
 }
 
 const LOG_LINES: usize = 2000;
+
+/// One pending update's changes, for the popup.
+pub struct WhatChanged {
+    pub favorite: Uuid,
+    pub installed: String,
+    pub latest: String,
+    /// Projects behind, by name ("Global" for the home folder).
+    pub places: Vec<String>,
+    pub changes: ChangesState,
+}
+
+pub enum ChangesState {
+    Loading,
+    Ready(Changes),
+    /// Why there's no file list, phrased for the user.
+    Unavailable(SharedString),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum JobKind {
@@ -140,7 +161,9 @@ impl AppState {
             checking: false,
             last_checked: None,
             check_error: None,
+            what_changed: None,
             _detect: None,
+            _changes: None,
             _resolve: None,
             _install: None,
             _check: None,
@@ -549,6 +572,129 @@ impl AppState {
         }
     }
 
+    /// Loads files + SKILL.md diff for `favorite`'s first pending update (four GitHub requests,
+    /// off the main thread). Kept while the same update is shown again.
+    pub fn show_changes(&mut self, favorite: Uuid, cx: &mut Context<Self>) {
+        let pending: Vec<Pending> = self
+            .pending()
+            .into_iter()
+            .filter(|p| p.favorite == favorite)
+            .collect();
+        let Some(first) = pending.first() else {
+            self.what_changed = None;
+            cx.notify();
+            return;
+        };
+        if self.what_changed.as_ref().is_some_and(|w| {
+            w.favorite == favorite && w.installed == first.installed && w.latest == first.latest
+        }) {
+            return;
+        }
+        let places = pending
+            .iter()
+            .map(|p| match p.project {
+                None => "Global".to_string(),
+                Some(id) => self
+                    .data
+                    .projects
+                    .iter()
+                    .find(|x| x.id == id)
+                    .map_or_else(String::new, |x| project_name(&x.path)),
+            })
+            .collect();
+        let (installed, latest) = (first.installed.clone(), first.latest.clone());
+        let repo = self
+            .data
+            .favorites
+            .iter()
+            .find(|f| f.id == favorite)
+            .and_then(updates::skill_ref)
+            .map(|r| r.repo);
+        let listable = updates::is_tree_sha(&installed) && updates::is_tree_sha(&latest);
+        let changes = match (repo, listable) {
+            (Some(repo), true) => {
+                let (old, new) = (installed.clone(), latest.clone());
+                let task = cx.background_executor().spawn(async move {
+                    let old = updates::fetch_tree_at(&repo, &old, None)?;
+                    let new = updates::fetch_tree_at(&repo, &new, None)?;
+                    diff::skill_changes(&old, &new, |sha| updates::fetch_blob(&repo, sha, None))
+                });
+                self._changes = Some(cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| {
+                        if let Some(shown) = this
+                            .what_changed
+                            .as_mut()
+                            .filter(|w| w.favorite == favorite)
+                        {
+                            shown.changes = match result {
+                                Ok(changes) => ChangesState::Ready(changes),
+                                Err(err) => ChangesState::Unavailable(
+                                    format!("Couldn't load the changes: {err}.").into(),
+                                ),
+                            };
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }));
+                ChangesState::Loading
+            }
+            _ => ChangesState::Unavailable(
+                "Changes are listed for single skills only; this one is tracked as a whole repo."
+                    .into(),
+            ),
+        };
+        self.what_changed = Some(WhatChanged {
+            favorite,
+            installed,
+            latest,
+            places,
+            changes,
+        });
+        cx.notify();
+    }
+
+    /// Pinned skills stay on their installed version: no pill, dot, or notification.
+    pub fn set_pinned(&mut self, favorite: Uuid, pinned: bool, cx: &mut Context<Self>) {
+        if self.data.set_pinned(favorite, pinned) {
+            let name = self.favorite_name(favorite);
+            self.popup_notice = Some(
+                if pinned {
+                    format!("Pinned {name}")
+                } else {
+                    format!("Unpinned {name}")
+                }
+                .into(),
+            );
+            self.save();
+            self.refresh_badge(cx);
+            cx.notify();
+        }
+    }
+
+    /// Hides the current latest version of `favorite`; a newer one shows again.
+    pub fn ignore_update(&mut self, favorite: Uuid, cx: &mut Context<Self>) {
+        let Some(latest) = self.latest.get(&favorite).cloned() else {
+            return;
+        };
+        if self.data.ignore_update(favorite, &latest) {
+            self.popup_notice =
+                Some(format!("Ignored this update to {}", self.favorite_name(favorite)).into());
+            self.save();
+            self.refresh_badge(cx);
+            cx.notify();
+        }
+    }
+
+    fn favorite_name(&self, favorite: Uuid) -> String {
+        self.data
+            .favorites
+            .iter()
+            .find(|f| f.id == favorite)
+            .map_or_else(String::new, |f| f.name.clone())
+    }
+
     pub fn set_auto_check(&mut self, on: bool, cx: &mut Context<Self>) {
         self.data.settings.auto_check = on;
         self.save();
@@ -764,6 +910,7 @@ impl AppState {
         if let Some(favorite) = self.data.remove_favorite(id) {
             self.popup_notice = Some(format!("Removed {}", favorite.name).into());
             self.save();
+            self.refresh_badge(cx);
             cx.notify();
         }
     }

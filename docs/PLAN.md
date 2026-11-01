@@ -130,7 +130,7 @@ Wire the context module into the palette ranking path (best-effort; graceful whe
 Background check, Update pill, filled menu bar icon, notification when real updates exist.
 **Accept:** changing a skill folder on GitHub surfaces an update; README-only does not.
 
-### [ ] T3.2 What changed + pin / ignore
+### [x] T3.2 What changed + pin / ignore (2026-11-01)
 Show file list + SKILL.md diff before updating. Pin version or ignore this update.
 **Accept:** user can see the diff, pin, and ignore; behavior is persisted.
 

@@ -104,6 +104,12 @@ pub fn check(favorites: &[Favorite], token: Option<&str>) -> CheckResult {
     check_with(favorites, |repo| fetch_tree(repo, token))
 }
 
+/// Whether a version is a folder's git tree SHA (40 hex), which GitHub can list. Whole-repo and
+/// root-skill versions are SHA-256 hashes (64 hex) and can't be listed.
+pub fn is_tree_sha(version: &str) -> bool {
+    version.len() == 40 && version.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// The favorite's version right now, fetching its repo's listing unless `trees` has it
 /// (blocking). For recording what an install or update just fetched.
 pub fn version_now(
@@ -373,6 +379,15 @@ mod tests {
             owner: owner.into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn tree_shas_are_listable() {
+        assert!(is_tree_sha("d79e2a5bb4df4a386c2adcdd9ab8709bba28c3f6"));
+        assert!(!is_tree_sha(&"a".repeat(64)));
+        assert!(!is_tree_sha("?"));
+        assert!(!is_tree_sha("t1fd"));
+        assert!(!is_tree_sha("g79e2a5bb4df4a386c2adcdd9ab8709bba28c3f6"));
     }
 
     #[test]
