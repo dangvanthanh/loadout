@@ -101,7 +101,7 @@ scan plus simple compatibility notes.
 
 ## M2 — The loop: "equip this project" (U1, U2, U6)
 
-### [ ] T2.1 Palette with project + stack + ranked suggestions
+### [x] T2.1 Palette with project + stack + ranked suggestions (2026-10-31)
 Palette shows Into line, Suggested / Loadouts / Other sections, keyboard navigation. Pre-select and rank by stack + context.
 **Accept:** ⌃⌥L on a Next.js project pre-selects the right favorites; ranking looks sensible.
 

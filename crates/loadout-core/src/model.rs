@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+pub use uuid::Uuid;
 
 /// One saved skill (or a whole repo of skills).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -32,6 +32,16 @@ pub struct Project {
     /// Unix seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used: Option<u64>,
+}
+
+impl Project {
+    pub fn new(path: PathBuf, last_used: Option<u64>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            path,
+            last_used,
+        }
+    }
 }
 
 /// A named set of favorites.

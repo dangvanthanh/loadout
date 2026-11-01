@@ -69,6 +69,11 @@ pub fn find_root(start: &Path, home: Option<&Path>) -> PathBuf {
     manifest.unwrap_or_else(|| start.to_path_buf())
 }
 
+/// `find_root` with the user's home folder.
+pub fn root_for(folder: &Path) -> PathBuf {
+    find_root(folder, dirs::home_dir().as_deref())
+}
+
 fn has_manifest(dir: &Path) -> bool {
     MANIFESTS.iter().any(|name| dir.join(name).exists())
         || std::fs::read_dir(dir).is_ok_and(|entries| {

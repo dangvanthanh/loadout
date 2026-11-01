@@ -37,7 +37,8 @@ fn open_palette(state: Entity<AppState>, cx: &mut App) -> Result<AnyWindowHandle
     let display = display_id
         .and_then(|id| cx.find_display(id))
         .or_else(|| cx.primary_display());
-    let size = size(palette::WIDTH, palette::height());
+    let favorites = state.read(cx).data.favorites.len();
+    let size = size(palette::WIDTH, palette::height(favorites));
     // Centered horizontally, vertically centered at 1/3 of the screen (display-relative).
     let origin = display.as_ref().map_or(point(px(0.), px(0.)), |display| {
         let screen = display.bounds().size;

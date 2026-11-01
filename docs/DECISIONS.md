@@ -192,3 +192,14 @@ sudo, deletes outside the project, encoded exec, credential reads, secrets sent 
 injection) and invisible characters, once per rule per file. Compatibility notes cover a missing SKILL.md or
 description, `allowed-tools`, `.claude/` paths, and Python/Node script runtimes. Informs only, never blocks.
 **Verified live:** `anthropics/skills` → 20 skills; `skills/pdf` version = its tree SHA; its scripts are flagged.
+
+## 026 — Palette keys, sections, and data ownership
+**Choice:** `AppState` loads `data.json` at launch (importing SkillDock's on first run). If it can't be read, it
+never saves over it. Each detection upserts the project into `projects` (`lastUsed`, `selectedProjectID`).
+Detection, `project::root_for`, and `stack::detect` run in one background task. The palette ranks favorites with
+`tags::rank_favorites` (context is empty until T2.5): "Suggested for <stack>" first, then "Other favorites". Labels
+appear only when something is suggested, and stack matches are pre-selected until the user toggles. Keys are caught
+in the capture phase before the search field: ↑↓ move, Tab toggles, Space toggles only while the search is empty
+(otherwise it types), Esc closes. The window height is fixed at open for up to seven rows; longer lists scroll.
+**Deferred:** the Loadouts section arrives with T4.1, because no loadout can exist before then. Extra icons
+(circle, sparkles) come from GPUI Kit's `icon_assets!`.
