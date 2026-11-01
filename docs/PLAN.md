@@ -109,7 +109,7 @@ Palette shows Into line, Suggested / Loadouts / Other sections, keyboard navigat
 Paste to add (any supported format), tags, rename, remove. Persist immediately.
 **Accept:** paste several formats; they appear and survive relaunch.
 
-### [ ] T2.3 Install from palette (U6)
+### [x] T2.3 Install from palette (U6) (2026-10-31)
 Return installs selected skills via official CLI into the target project. Skip already-installed. Stream output to log.
 Write provenance.
 **Accept:** installing a known skill creates the expected agent folders / lock entries; provenance has an entry.

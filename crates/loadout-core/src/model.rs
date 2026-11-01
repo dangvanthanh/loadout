@@ -140,7 +140,41 @@ pub struct Added {
     pub skipped: Vec<String>,
 }
 
+/// `installed` key: "<project id or global>|<favorite id>", uppercase like the prototype.
+pub fn installed_key(project: Option<Uuid>, favorite: Uuid) -> String {
+    let upper = |id: Uuid| id.hyphenated().to_string().to_uppercase();
+    let scope = project.map_or_else(|| "global".to_string(), upper);
+    format!("{scope}|{}", upper(favorite))
+}
+
 impl SavedState {
+    pub fn is_installed(&self, project: Option<Uuid>, favorite: Uuid) -> bool {
+        self.installed
+            .contains_key(&installed_key(project, favorite))
+    }
+
+    /// Records an install; the version stays "?" until an update check knows it.
+    pub fn mark_installed(&mut self, project: Option<Uuid>, favorite: Uuid, version: Option<&str>) {
+        let entry = self
+            .installed
+            .entry(installed_key(project, favorite))
+            .or_insert_with(|| "?".into());
+        if let Some(version) = version {
+            *entry = version.to_string();
+        }
+    }
+
+    /// The saved project for `path`, added if new.
+    pub fn project_id(&mut self, path: &std::path::Path) -> Uuid {
+        if let Some(project) = self.projects.iter().find(|p| p.path == path) {
+            return project.id;
+        }
+        let project = Project::new(path.to_path_buf(), None);
+        let id = project.id;
+        self.projects.push(project);
+        id
+    }
+
     /// Adds favorites not already saved; untagged ones get `tags::suggest_tags`.
     pub fn add_favorites(&mut self, favorites: Vec<Favorite>) -> Added {
         let mut result = Added::default();
@@ -202,6 +236,39 @@ impl SavedState {
 mod tests {
     use super::*;
     use crate::parser::{favorite, parse};
+
+    #[test]
+    fn installed_keys_match_the_prototype() {
+        let project = Uuid::parse_str("7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f").unwrap();
+        let fav = Uuid::parse_str("e621e1f8-c36c-495a-93fc-0c247a3e6e5f").unwrap();
+        assert_eq!(
+            installed_key(Some(project), fav),
+            "7C1D2E3F-4A5B-4C6D-8E9F-0A1B2C3D4E5F|E621E1F8-C36C-495A-93FC-0C247A3E6E5F"
+        );
+        assert_eq!(
+            installed_key(None, fav),
+            "global|E621E1F8-C36C-495A-93FC-0C247A3E6E5F"
+        );
+    }
+
+    #[test]
+    fn mark_and_query_installs() {
+        let mut state = SavedState::default();
+        let shop = state.project_id(std::path::Path::new("/Code/shop"));
+        assert_eq!(state.project_id(std::path::Path::new("/Code/shop")), shop);
+        assert_eq!(state.projects.len(), 1);
+        let fav = Uuid::new_v4();
+        assert!(!state.is_installed(Some(shop), fav));
+        state.mark_installed(Some(shop), fav, None);
+        assert!(state.is_installed(Some(shop), fav));
+        assert!(!state.is_installed(None, fav));
+        assert_eq!(state.installed[&installed_key(Some(shop), fav)], "?");
+        state.mark_installed(Some(shop), fav, Some("t1fd"));
+        assert_eq!(state.installed[&installed_key(Some(shop), fav)], "t1fd");
+        // A later "?" doesn't erase a known version.
+        state.mark_installed(Some(shop), fav, None);
+        assert_eq!(state.installed[&installed_key(Some(shop), fav)], "t1fd");
+    }
 
     #[test]
     fn add_skips_duplicates_and_suggests_tags() {

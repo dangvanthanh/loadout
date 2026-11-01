@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use gpui_kit::*;
-use loadout_core::model::{Added, Favorite, Project, SavedState, Uuid};
+use loadout_core::installer::{self, InstallError};
+use loadout_core::model::{Added, Favorite, SavedState, Uuid};
 use loadout_core::stack::{self, StackTag};
 use loadout_core::{parser, project, provenance, storage, tags, ui_skills};
 
@@ -30,8 +33,24 @@ pub struct AppState {
     pub login_item: LoginItem,
     /// Last popup status line, e.g. why open at login failed.
     pub popup_notice: Option<SharedString>,
+    /// Output of `skills` runs, newest last.
+    pub log: Vec<SharedString>,
+    pub installing: bool,
+    /// "Installed 2 skills in shop-dashboard", shown in the palette footer.
+    pub install_status: Option<SharedString>,
     _detect: Option<Task<()>>,
     _resolve: Option<Task<()>>,
+    _install: Option<Task<()>>,
+}
+
+const LOG_LINES: usize = 2000;
+
+enum InstallEvent {
+    Line(String),
+    Done {
+        favorite: Favorite,
+        result: Result<i32, InstallError>,
+    },
 }
 
 pub struct GlobalAppState(pub Entity<AppState>);
@@ -67,8 +86,12 @@ impl AppState {
             target: Target::default(),
             login_item: login_item::status(),
             popup_notice,
+            log: Vec::new(),
+            installing: false,
+            install_status: None,
             _detect: None,
             _resolve: None,
+            _install: None,
         }
     }
 
@@ -91,26 +114,170 @@ impl AppState {
 
     /// Records `root` as the current project (prototype-compatible `projects` list).
     fn remember_project(&mut self, root: &std::path::Path) {
-        let now = Some(provenance::now());
-        let id = match self.data.projects.iter_mut().find(|p| p.path == root) {
-            Some(project) => {
-                project.last_used = now;
-                project.id
-            }
-            None => {
-                let project = Project::new(root.to_path_buf(), now);
-                let id = project.id;
-                self.data.projects.push(project);
-                id
-            }
-        };
+        let id = self.data.project_id(root);
+        if let Some(project) = self.data.projects.iter_mut().find(|p| p.id == id) {
+            project.last_used = Some(provenance::now());
+        }
         self.data.selected_project_id = Some(id);
         self.save();
+    }
+
+    /// The install scope for the current target: its project id, or `None` for global.
+    fn scope(&self) -> Option<Uuid> {
+        let root = self
+            .target
+            .root
+            .as_deref()
+            .filter(|_| !self.data.settings.global)?;
+        self.data
+            .projects
+            .iter()
+            .find(|p| p.path == root)
+            .map(|p| p.id)
+    }
+
+    /// Whether Loadout recorded installing `favorite` into the current target.
+    pub fn is_installed_here(&self, favorite: Uuid) -> bool {
+        let global = self.data.settings.global;
+        (global || self.target.root.is_some()) && self.data.is_installed(self.scope(), favorite)
+    }
+
+    fn push_log(&mut self, line: impl Into<SharedString>) {
+        self.log.push(line.into());
+        if self.log.len() > LOG_LINES {
+            self.log.drain(..self.log.len() - LOG_LINES);
+        }
+    }
+
+    /// Installs `ids` into the current target with `npx skills add`, one after another, off the
+    /// main thread. Skips favorites already installed there. Output streams into `log`.
+    pub fn install(&mut self, ids: &[Uuid], cx: &mut Context<Self>) {
+        if self.installing {
+            return;
+        }
+        let global = self.data.settings.global;
+        let root = self.target.root.clone();
+        let place = match (&root, global) {
+            (_, true) => "Global".to_string(),
+            (Some(root), false) => root.file_name().map_or_else(
+                || root.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
+            (None, false) => {
+                self.install_status = Some("No project to install into.".into());
+                cx.notify();
+                return;
+            }
+        };
+        let scope = match (&root, global) {
+            (Some(root), false) => Some(self.data.project_id(root)),
+            _ => None,
+        };
+        let todo: Vec<Favorite> = self
+            .data
+            .favorites
+            .iter()
+            .filter(|f| ids.contains(&f.id) && !self.data.is_installed(scope, f.id))
+            .cloned()
+            .collect();
+        if todo.is_empty() {
+            self.install_status = Some("Already installed".into());
+            cx.notify();
+            return;
+        }
+
+        let settings = self.data.settings.clone();
+        let jobs: Vec<(Favorite, String)> = todo
+            .into_iter()
+            .map(|f| {
+                let command = installer::install_command(&f, &settings);
+                (f, command)
+            })
+            .collect();
+        self.install_status = Some(match jobs.as_slice() {
+            [(one, _)] => format!("Installing {}…", one.name).into(),
+            many => format!("Installing {} skills…", many.len()).into(),
+        });
+        self.installing = true;
+        cx.notify();
+
+        let dir = if global { None } else { root.clone() };
+        let (tx, rx) = mpsc::channel();
+        let work_dir = dir.clone();
+        let work = cx.background_executor().spawn(async move {
+            for (favorite, command) in jobs {
+                let _ = tx.send(InstallEvent::Line(format!("$ {command}")));
+                let result = installer::run(&command, work_dir.as_deref(), |line| {
+                    let _ = tx.send(InstallEvent::Line(line.to_string()));
+                });
+                let _ = tx.send(InstallEvent::Done { favorite, result });
+            }
+        });
+        let agent = Some(settings.agents.clone()).filter(|a| !a.trim().is_empty());
+        self._install = Some(cx.spawn(async move |this, cx| {
+            let _work = work;
+            let (mut installed, mut failed, mut npx_missing) = (Vec::new(), Vec::new(), false);
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let mut events = Vec::new();
+                let finished = loop {
+                    match rx.try_recv() {
+                        Ok(event) => events.push(event),
+                        Err(mpsc::TryRecvError::Empty) => break false,
+                        Err(mpsc::TryRecvError::Disconnected) => break true,
+                    }
+                };
+                let alive = this.update(cx, |this, cx| {
+                    for event in events {
+                        match event {
+                            InstallEvent::Line(line) => this.push_log(line),
+                            InstallEvent::Done { favorite, result } => match result {
+                                Ok(0) => {
+                                    this.data.mark_installed(scope, favorite.id, None);
+                                    let mut entry = provenance::entry(
+                                        provenance::INSTALL,
+                                        dir.as_deref(),
+                                        &favorite,
+                                    );
+                                    entry.agent = agent.clone();
+                                    provenance::append(&mut this.data, entry);
+                                    installed.push(favorite.name);
+                                }
+                                Ok(code) => {
+                                    this.push_log(format!("Exited with code {code}"));
+                                    failed.push(favorite.name);
+                                }
+                                Err(err) => {
+                                    npx_missing |= matches!(err, InstallError::NpxMissing);
+                                    this.push_log(err.to_string());
+                                    failed.push(favorite.name);
+                                }
+                            },
+                        }
+                    }
+                    if finished {
+                        this.installing = false;
+                        this.install_status =
+                            Some(install_summary(&installed, &failed, npx_missing, &place).into());
+                        this.save();
+                    }
+                    cx.notify();
+                });
+                if finished || alive.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     /// Resolves the target for `app` off the main thread; the last project stands in meanwhile.
     pub fn detect_target(&mut self, app: Option<FrontApp>, cx: &mut Context<Self>) {
         let fallback = self.last_project();
+        if !self.installing {
+            self.install_status = None;
+        }
         self.target = Target {
             root: fallback.clone(),
             detecting: true,
@@ -292,5 +459,30 @@ impl AppState {
     /// "Next.js, Tailwind" for the Into line.
     pub fn stack_summary(&self) -> String {
         stack::summary(&self.target.stack, 2)
+    }
+}
+
+/// "Installed 2 skills in shop-dashboard", "Couldn't install tdd. See log.", …
+fn install_summary(
+    installed: &[String],
+    failed: &[String],
+    npx_missing: bool,
+    place: &str,
+) -> String {
+    if npx_missing {
+        return InstallError::NpxMissing.to_string();
+    }
+    let skills = |names: &[String]| match names {
+        [one] => one.clone(),
+        many => format!("{} skills", many.len()),
+    };
+    match (installed.is_empty(), failed.is_empty()) {
+        (_, true) => format!("Installed {} in {place}", skills(installed)),
+        (true, false) => format!("Couldn't install {}. See log.", skills(failed)),
+        (false, false) => format!(
+            "Installed {}; couldn't install {}. See log.",
+            skills(installed),
+            skills(failed)
+        ),
     }
 }

@@ -136,6 +136,8 @@ impl Palette {
                 .map(|r| r.id)
                 .collect();
         }
+        // Installed skills are skipped, so they're never part of the selection.
+        self.selected.retain(|id| !state.is_installed_here(*id));
     }
 
     /// Visible row indexes for the current query.
@@ -211,9 +213,26 @@ impl Palette {
             "tab" => self.toggle_highlighted(cx),
             // With a query, space types; Tab still toggles.
             "space" if query_empty => self.toggle_highlighted(cx),
+            "enter" => self.install(cx),
             _ => return,
         }
         cx.stop_propagation();
+    }
+
+    /// Return: install the selection, or the highlighted row when nothing is selected.
+    fn install(&mut self, cx: &mut Context<Self>) {
+        let mut ids: Vec<Uuid> = self
+            .rows
+            .iter()
+            .filter(|r| self.selected.contains(&r.id))
+            .map(|r| r.id)
+            .collect();
+        if ids.is_empty()
+            && let Some(&ix) = self.visible(cx).get(self.highlight)
+        {
+            ids.push(self.rows[ix].id);
+        }
+        self.state.update(cx, |state, cx| state.install(&ids, cx));
     }
 
     fn dismiss(&mut self, _: &Dismiss, window: &mut Window, _: &mut Context<Self>) {
@@ -279,6 +298,7 @@ impl Render for Palette {
                 }
             })
             .collect();
+        let status = self.state.read(cx).install_status.clone();
         let theme = cx.theme();
         let selected = self.selected.len();
         let empty = self.rows.is_empty();
@@ -331,10 +351,11 @@ impl Render for Palette {
                     .gap_3()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(match selected {
-                        0 => "space selects".to_string(),
-                        1 => "↩ Install 1 skill".to_string(),
-                        n => format!("↩ Install {n} skills"),
+                    .child(match (status, selected) {
+                        (Some(status), _) => status,
+                        (None, 0) => "↩ Install highlighted".into(),
+                        (None, 1) => "↩ Install 1 skill".into(),
+                        (None, n) => format!("↩ Install {n} skills").into(),
                     })
                     .child(div().flex_1())
                     .child("↑↓ move · space select · esc close"),

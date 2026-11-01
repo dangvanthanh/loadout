@@ -49,6 +49,8 @@ pub struct Popup {
     paste: Entity<InputState>,
     edit: Entity<InputState>,
     editing: Option<(Uuid, Field)>,
+    /// The list area shows `skills` output instead of favorites.
+    show_log: bool,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -110,6 +112,7 @@ impl Popup {
             paste,
             edit,
             editing: None,
+            show_log: false,
             scroll: ScrollHandle::new(),
             _subscriptions,
         }
@@ -135,6 +138,14 @@ impl Popup {
             edit.set_value(value, window, cx);
             edit.focus(window, cx);
         });
+        cx.notify();
+    }
+
+    fn toggle_log(&mut self, cx: &mut Context<Self>) {
+        self.show_log = !self.show_log;
+        if self.show_log {
+            self.scroll.scroll_to_bottom();
+        }
         cx.notify();
     }
 
@@ -245,11 +256,24 @@ impl Popup {
 impl Render for Popup {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.state.read(cx).data.favorites.len();
-        let rows: Vec<AnyElement> = (0..count).map(|ix| self.render_favorite(ix, cx)).collect();
+        let rows: Vec<AnyElement> = if self.show_log {
+            Vec::new()
+        } else {
+            (0..count).map(|ix| self.render_favorite(ix, cx)).collect()
+        };
         let theme = cx.theme();
         let state = self.state.read(cx);
         let login_on = state.login_item != LoginItem::Off;
-        let notice = state.popup_notice.clone();
+        let notice = state
+            .popup_notice
+            .clone()
+            .or_else(|| state.install_status.clone());
+        let has_log = !state.log.is_empty();
+        let log: Vec<SharedString> = if self.show_log {
+            state.log.clone()
+        } else {
+            Vec::new()
+        };
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::dismiss))
@@ -292,7 +316,13 @@ impl Render for Popup {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .when(count == 0, |list| {
+                    .when(self.show_log, |list| {
+                        list.font_family("Menlo")
+                            .text_size(px(10.))
+                            .text_color(theme.muted_foreground)
+                            .children(log.into_iter().map(|line| div().child(line)))
+                    })
+                    .when(!self.show_log && count == 0, |list| {
                         list.text_size(px(12.))
                             .text_color(theme.muted_foreground)
                             .child("Paste a GitHub or skills.sh link, owner/repo, or an npx skills add command.")
@@ -319,6 +349,15 @@ impl Render for Popup {
                             }),
                     )
                     .child(div().flex_1())
+                    .when(has_log, |footer| {
+                        footer.child(
+                            Button::new("log")
+                                .ghost()
+                                .xsmall()
+                                .label(if self.show_log { "Favorites" } else { "Log" })
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_log(cx))),
+                        )
+                    })
                     .child(
                         Button::new("test-notification")
                             .ghost()

@@ -210,3 +210,14 @@ background. `SavedState::add_favorites` skips duplicates (same source, case-inse
 untagged favorites with `suggest_tags`. Right-click a row for Rename… / Tags… (inline field, Return saves, Esc
 cancels) / Remove; hovering a row also shows ✕. Removing drops the favorite from loadouts and from `installed`.
 Every change saves at once. Popup notices ("Added pdf") clear when the popup closes.
+
+## 028 — Install runs as one background batch with a polled log
+**Choice:** Return installs the selection, or the highlighted row when nothing is selected. `AppState::install`
+runs `installer::run` for each favorite on the background executor. Lines come back over a std `mpsc` channel that a
+100 ms foreground timer drains into `AppState.log` (capped at 2000 lines), so there's no new dependency. Favorites
+already recorded for the target (`installed["<project id|global>|<favorite id>"]`) are skipped. A success records
+`"?"` as the version (T3.1 fills it in) and appends an `install` provenance entry with the agents. The palette
+footer shows "Installing tdd…" → "Installed 2 skills in shop-dashboard" / "Couldn't install tdd. See log.". The
+popup shows the same status and a Log toggle.
+**Verified:** a real `frontend-design` install into a temp project wrote the skill folder, `skills-lock.json`, the
+`installed` record, and the provenance entry.
