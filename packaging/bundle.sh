@@ -10,9 +10,10 @@ APP="target/Loadout.app"
 cargo build --release -p loadout
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/loadout "$APP/Contents/MacOS/Loadout"
 cp packaging/Info.plist "$APP/Contents/Info.plist"
+cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$APP"
 
 echo "Built $APP"

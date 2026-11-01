@@ -242,3 +242,11 @@ pre-selected), `tdd` second (context "testing", not pre-selected), and an untagg
 **Choice:** `AppState::install` refuses while detection runs and shows "Finding the project…", which clears when
 detection lands. A fast ⌃⌥L + Return would otherwise install into the fallback (last used) project shown before
 detection finished. An empty selection on an empty list does nothing. Found in the M2 self-review.
+
+## 032 — App icon: the octopus in a bucket hat
+**Choice:** `packaging/icon/AppIcon.png` comes from `reference/images-prototype/logo.jpg` with the slate background
+removed. The tile is a fitted rounded square (inset 4 px past the source's dark anti-aliased rim); the hat's crown
+keeps its overhang above the tile. It follows the macOS icon grid: an 824 px body centered on a 1024 canvas,
+transparent around it. `packaging/icon/make-icns.sh` builds `packaging/AppIcon.icns` (16–512 @1x/@2x); `bundle.sh`
+copies it to `Contents/Resources` and `Info.plist` names it (`CFBundleIconFile`). The menu bar keeps its SF Symbol:
+a full-color mascot doesn't work as a monochrome template at 18 pt. This covers the icon part of T5.5.
