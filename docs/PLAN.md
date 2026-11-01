@@ -93,7 +93,7 @@ matching favorites higher; keep the ranking deterministic and tested.
 scan plus simple compatibility notes.
 **Accept:** tests cover README-only (no update), real folder change (update), and several safety patterns.
 
-### [ ] T1.7 Provenance (U8)
+### [x] T1.7 Provenance (U8) (2026-10-31)
 `provenance.rs`. Append-only entries on install/update/remove/apply. Persist in `SavedState`. Simple query helpers.
 **Accept:** provenance tests green; entries survive round-trip.
 

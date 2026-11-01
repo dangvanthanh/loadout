@@ -7,6 +7,7 @@ pub mod installer;
 pub mod model;
 pub mod parser;
 pub mod project;
+pub mod provenance;
 pub mod safety;
 pub mod stack;
 pub mod storage;

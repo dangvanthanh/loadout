@@ -68,7 +68,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Model + storage, paste parser, installer, update checker
 - ✅ Project root finder + stack detector (U1, U2)
 - ✅ Diff, safety + compatibility scanner (U3, U4)
-- ⬜ Provenance log model (U8)
+- ✅ Provenance log model (U8)
 
 ### M2 — The loop: "equip this project" (U1, U2, U6)
 - ⬜ Palette: detected project + stack, favorites with suggestions pre-selected and ranked, Return installs
