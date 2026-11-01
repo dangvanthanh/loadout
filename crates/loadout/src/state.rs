@@ -476,7 +476,7 @@ impl AppState {
         if self.installing {
             return;
         }
-        let mut jobs = Vec::new();
+        let (mut jobs, mut skipped) = (Vec::new(), 0);
         for p in self.pending() {
             if only.is_some_and(|id| id != p.favorite) {
                 continue;
@@ -495,6 +495,7 @@ impl AppState {
                             project.path.display()
                         );
                         self.push_log(line);
+                        skipped += 1;
                         continue;
                     }
                     None => continue,
@@ -509,6 +510,10 @@ impl AppState {
             });
         }
         if jobs.is_empty() {
+            if skipped > 0 {
+                self.install_status =
+                    Some("Nothing to update: those project folders are gone. See log.".into());
+            }
             cx.notify();
             return;
         }

@@ -80,7 +80,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Update check, Update pill, notification, filled menu bar icon
 - ✅ What changed (files + SKILL.md diff), pin, ignore
 - ✅ Safety + compatibility glance on first install; skill preview
-- ✅ Provenance entries written on install/update/remove
+- ✅ Provenance entries written on install/update, shown in History (remove entries come with uninstall, T5.4)
 
 ### M4 — Loadouts and agent awareness (U5, U7, U9)
 - ⬜ Create, apply, manage loadouts (including preferred agent)
