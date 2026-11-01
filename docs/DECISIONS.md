@@ -82,7 +82,7 @@ fallbacks (e.g. parsing the window title).
   the AX FFI; no `accessibility-sys`. The system prompt shows once per launch.
 - Expected to work: Zed (GPUI sets `representedFilename`), VS Code / Cursor (Electron sets it for the active
   file), Xcode, Terminal and Ghostty (proxy icon = working directory). JetBrains IDEs are unlikely to expose it.
-  Not yet confirmed on a machine with the permissions granted; correct this list during the T0.3 hand check.
+  Hand check on 2026-10-31 passed with Finder, Zed, and an Xcode or VS Code window in front.
 - The folder is the document's folder; walking up to the project root is T1.4.
 - Fallback: the last detected folder for this session, labelled "last used" (persisted projects arrive with T1.1).
   No window-title parsing: titles give a project name, not a path.
@@ -132,3 +132,12 @@ skips posting when unbundled). No `objc2-user-notifications` dependency; `macos/
 the menu bar's appearance.
 **Note:** the T0.4 popup holds only the spike controls (open at login, test notification, quit). M5 (T5.3) replaces
 it with the real popup.
+
+## 020 — data.json keeps the prototype's keys
+**Choice:** `settings.autoCheck` (not a new `checkUpdates`), `settings.global`, `selectedProjectID`, and `installed`
+stay exactly as SkillDock wrote them. New keys (`tags`, `loadouts`, `provenance`, `hotkey`, digest and launch
+settings) default when missing. `skillState` waits for pin/ignore (T3.2) so we don't freeze a key before it has a
+use. With no `Loadout/data.json` yet, `storage::load` reads `SkillDock/data.json`; the first save writes Loadout's
+own file and leaves the prototype's alone. A file that doesn't parse is renamed `data.json.corrupt-<secs>` and
+Loadout starts empty, so nothing is overwritten.
+**Agents:** `agents.rs` copies 18 common agents' skill folders from `skills` 1.7.4. Unknown ids still pass to `-a`.

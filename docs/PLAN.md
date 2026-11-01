@@ -61,7 +61,7 @@ notification appears; open-at-login toggles in System Settings.
 
 ## M1 — Core library (`loadout-core`, no UI, fully tested)
 
-### [ ] T1.1 Model and storage
+### [x] T1.1 Model and storage (2026-10-31)
 `model.rs`, `storage.rs`, `agents.rs`. Atomic save, `#[serde(default)]` everywhere, camelCase, corrupt-file recovery.
 Include `Loadout.preferred_agent`, `ProvenanceEntry`, digest settings.
 Tests: `{}`, a prototype `data.json` fixture (imported from `~/Library/Application Support/SkillDock/` if present),

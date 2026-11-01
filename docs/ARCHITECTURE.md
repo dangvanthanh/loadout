@@ -160,7 +160,8 @@ pub struct Loadout {
 pub struct Settings {
     #[serde(default = "default_agents")] pub agents: String,     // comma-separated or primary
     #[serde(default = "default_hotkey")] pub hotkey: String,     // "ctrl+alt+KeyL"
-    #[serde(default)] pub check_updates: bool,
+    #[serde(default)] pub global: bool,                          // prototype key
+    #[serde(default)] pub auto_check: bool,                      // prototype key "autoCheck"
     #[serde(default)] pub digest_enabled: bool,                  // U11
     #[serde(default)] pub digest_interval_hours: u32,            // e.g. 24 or 168
     #[serde(default)] pub launch_after_install: bool,            // default for equip+launch
@@ -185,7 +186,9 @@ pub struct SavedState {
     pub projects: Vec<Project>,
     pub loadouts: Vec<Loadout>,
     pub settings: Settings,
-    pub skill_state: HashMap<String, SkillState>, // key = source(+skill)
+    pub selected_project_id: Option<Uuid>,       // prototype key "selectedProjectID"
+    pub installed: BTreeMap<String, String>,     // prototype key: "<project id|global>|<favorite id>" → version
+    // skill_state (pin / ignore, key = source(+skill)) arrives with T3.2
     #[serde(default)] pub provenance: Vec<ProvenanceEntry>,
     // keep append-only; trim old entries in a later polish task if needed
 }

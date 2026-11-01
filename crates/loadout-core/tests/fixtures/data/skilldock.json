@@ -1,0 +1,31 @@
+{
+  "favorites" : [
+    {
+      "id" : "E621E1F8-C36C-495A-93FC-0C247A3E6E5F",
+      "name" : "frontend-design",
+      "skill" : "frontend-design",
+      "source" : "anthropics\/skills"
+    },
+    {
+      "id" : "0B9F5C1E-2D3A-4F6B-8C7D-9E0F1A2B3C4D",
+      "name" : "skills",
+      "source" : "https:\/\/github.com\/mattpocock\/skills"
+    }
+  ],
+  "installed" : {
+    "7C1D2E3F-4A5B-4C6D-8E9F-0A1B2C3D4E5F|E621E1F8-C36C-495A-93FC-0C247A3E6E5F" : "3f2a9c",
+    "global|0B9F5C1E-2D3A-4F6B-8C7D-9E0F1A2B3C4D" : "?"
+  },
+  "projects" : [
+    {
+      "id" : "7C1D2E3F-4A5B-4C6D-8E9F-0A1B2C3D4E5F",
+      "path" : "\/Users\/me\/Code\/shop-dashboard"
+    }
+  ],
+  "selectedProjectID" : "7C1D2E3F-4A5B-4C6D-8E9F-0A1B2C3D4E5F",
+  "settings" : {
+    "agents" : "claude-code,cursor",
+    "autoCheck" : false,
+    "global" : false
+  }
+}
