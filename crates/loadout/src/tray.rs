@@ -5,13 +5,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use gpui_kit::{Bounds, DisplayId, Global, Pixels, point, px, size};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{AnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{NSImage, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
-use objc2_foundation::{NSObject, ns_string};
+use objc2_foundation::{NSData, NSObject, NSSize, ns_string};
 
 use crate::macos;
 
 static CLICKED: AtomicBool = AtomicBool::new(false);
+
+/// 36 px artwork drawn at 18 pt; regenerate with `packaging/icon/make-menubar.sh`.
+const ICON: &[u8] = include_bytes!("../assets/tray/menubar@2x.png");
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -39,11 +42,11 @@ impl Tray {
     pub fn new(mtm: MainThreadMarker) -> Option<Self> {
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         let button = item.button(mtm)?;
-        // An SF Symbol is a template image already: it follows the menu bar's appearance.
-        let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-            ns_string!("square.stack.3d.up"),
-            Some(ns_string!("Loadout")),
-        )?;
+        let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(ICON))?;
+        image.setSize(NSSize::new(18., 18.));
+        // Template: AppKit tints it to match the menu bar (light, dark, highlighted).
+        image.setTemplate(true);
+        image.setAccessibilityDescription(Some(ns_string!("Loadout")));
         button.setImage(Some(&image));
         // SAFETY: plain NSObject subclass with no ivars; `init` is NSObject's.
         let target: Retained<ClickTarget> = unsafe { msg_send![ClickTarget::alloc(mtm), init] };

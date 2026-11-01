@@ -24,5 +24,5 @@ if [[ "${1:-}" == "--install" ]]; then
   rm -rf /Applications/Loadout.app
   cp -R "$APP" /Applications/
   open /Applications/Loadout.app
-  echo "Installed to /Applications and launched. Look for the stack icon in the menu bar."
+  echo "Installed to /Applications and launched. Look for the octopus in the menu bar."
 fi

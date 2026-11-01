@@ -250,3 +250,12 @@ keeps its overhang above the tile. It follows the macOS icon grid: an 824 px bod
 transparent around it. `packaging/icon/make-icns.sh` builds `packaging/AppIcon.icns` (16–512 @1x/@2x); `bundle.sh`
 copies it to `Contents/Resources` and `Info.plist` names it (`CFBundleIconFile`). The menu bar keeps its SF Symbol:
 a full-color mascot doesn't work as a monochrome template at 18 pt. This covers the icon part of T5.5.
+
+## 033 — New logo art; the menu bar gets the octopus too
+**Choice:** Supersedes the source and menu bar parts of 032. `packaging/icon/AppIcon.png` is now
+`reference/images-prototype/loadout-logo.png` (already a rounded tile), scaled to the 824 px body of the 1024 px
+grid; `make-icns.sh` is unchanged. The menu bar uses `loadout-menubar.png` instead of the SF Symbol, as a template
+image so AppKit tints it for light, dark, and highlighted menu bars. A template keeps only alpha, which would turn
+the light-gray art into a blob, so `packaging/icon/make-menubar.sh` (ImageMagick) cuts the darker detail lines (eyes,
+smile, hat band) out of the silhouette at an 85 % gray threshold and writes a 36 px PNG. The binary embeds it
+(`include_bytes!`), so `cargo run` shows it too. Generated files are committed; builds don't need ImageMagick.

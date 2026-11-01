@@ -97,10 +97,11 @@ loadout/
         login_item.rs             SMAppService
         url_scheme.rs             loadout:// and .loadout.json open events
         launch.rs                 open agent via URL scheme / CLI
-    loadout/assets/           icons/ (only if GPUI Kit's set lacks one; tray uses SF Symbols)
+    loadout/assets/           tray/menubar@2x.png (template), icons/ only if GPUI Kit's set lacks one
   packaging/
     Info.plist                    LSUIElement, CFBundleURLTypes (loadout), NSAppleEventsUsageDescription
     bundle.sh                     release build → Loadout.app (+ --install, --universal, --release)
+    AppIcon.icns, icon/           app icon + make-icns.sh / make-menubar.sh (regenerate from reference art)
   reference/swift-prototype/      earlier SwiftUI version (old name SkillDock); behavior reference
   docs/
   AGENTS.md                       rules for Pi Harness (and other agents)
