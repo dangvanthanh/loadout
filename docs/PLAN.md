@@ -23,7 +23,7 @@ Port its behavior; don't copy its structure.
 
 Answer the questions that could change the architecture before writing features.
 
-### [ ] T0.1 Workspace and hello window
+### [x] T0.1 Workspace and hello window (2026-10-31)
 - Prerequisites: Rust stable via rustup, full Xcode selected (GPUI compiles Metal shaders). If the Metal step fails,
   try GPUI's `runtime_shaders` feature and record the result in `DECISIONS.md`.
 - Create the workspace: `Cargo.toml`, `rust-toolchain.toml`, `crates/loadout-core`, `crates/loadout`.

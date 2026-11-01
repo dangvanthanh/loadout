@@ -1,0 +1,9 @@
+[package]
+name = "loadout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+loadout-core = { path = "../loadout-core" }
+gpui-kit = "=0.8.1"

@@ -89,3 +89,11 @@ clear differentiation and natural moments (diff, launch, team share) while stayi
 **Choice:** Ranking may use recent files, open editors, or simple git signals when available; otherwise fall back to
 stack tags only. Never block the palette on missing context.
 **Why:** Keeps the core loop fast and permission-light. Context is a ranking boost, not a requirement.
+
+## 017 — Pin GPUI Kit 0.8.1; build Metal shaders ahead of time
+**Choice:** `gpui-kit = "=0.8.1"` (brings `gpui-pre` 0.3.10), Rust edition 2024, stable toolchain. No separate `gpui`
+line. GPUI's `runtime_shaders` feature isn't needed: the Metal step builds with full Xcode selected.
+**Why:** GPUI Kit is the single facade for GPUI and its components (`gpui_kit::*`, `gpui_kit::component`). An exact
+pin keeps the GPUI flavor stable for the objc2 glue and any future tray crate.
+**Note:** GPUI Kit doesn't follow system appearance by itself; each window calls `Theme::sync_system_appearance`
+from `observe_window_appearance`.
