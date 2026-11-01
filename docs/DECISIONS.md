@@ -148,3 +148,14 @@ suffix (Swift removed it anywhere, so `acme/my.github-tools` lost letters). ui-s
 `npx skills add [^<\n"]+` on the raw HTML and decodes entities per match: the live page carries the command in a
 `data-command-row="…"` attribute, where the old pattern ran past the closing quote into the tag. The fixture is a
 trimmed excerpt of the real page (2026-10-31). URLs are split by hand; no `url` crate.
+
+## 022 — Installer runs one merged pipe through a login shell
+**Choice:** `installer::run` starts `/bin/zsh -lc` with the prototype's PATH/nvm preamble. stdout and stderr share
+one `std::io::pipe`, so lines arrive in order. Output is split on `\n` and `\r` and ANSI is stripped; stdin is
+null; the env sets `NO_COLOR`, `FORCE_COLOR=0`, `DO_NOT_TRACK`. A missing `npx` prints a marker line and exits 127,
+which becomes `InstallError::NpxMissing`, so there's no second shell launch to check for it. `run` refuses any command
+containing `skills check` / `skills update` (DECISIONS 003). `remove_command` needs skill names; without them the CLI
+would prompt. Agent lists split on commas or whitespace, as in the prototype.
+**Verified:** `npx -y skills add 'anthropics/skills' --skill 'frontend-design' -a 'claude-code' -y` in a temp dir
+exited 0 and wrote `.claude/skills/frontend-design/` and `skills-lock.json` (`skills` → name → `source`,
+`sourceType`, `skillPath`, `computedHash`).

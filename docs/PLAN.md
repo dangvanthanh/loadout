@@ -74,7 +74,7 @@ URLs, gitlab, skills.sh repo/skill/site and reserved paths, `npx skills add` wit
 ui-skills from a saved HTML fixture.
 **Accept:** parser tests green.
 
-### [ ] T1.3 Installer
+### [x] T1.3 Installer (2026-10-31)
 `installer.rs`: `shq`, `agent_list`, `install_command`, `remove_command`, `run(cmd, dir, on_line) -> exit code` with
 streaming and ANSI stripping. Missing `npx` → typed error.
 **Accept:** installer unit tests green; a manual dry-run against a temp dir works.

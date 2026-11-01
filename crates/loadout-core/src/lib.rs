@@ -1,6 +1,7 @@
 //! Loadout's rules and non-UI side effects. No GPUI dependency.
 
 pub mod agents;
+pub mod installer;
 pub mod model;
 pub mod parser;
 pub mod project;

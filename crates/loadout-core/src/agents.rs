@@ -78,10 +78,14 @@ pub fn find(id: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|agent| agent.id == id)
 }
 
-/// `Settings.agents` ("claude-code, cursor") → ids, trimmed, empties and duplicates dropped.
+/// `Settings.agents` ("claude-code, cursor") → ids. Commas or whitespace separate;
+/// empties and duplicates are dropped.
 pub fn parse_list(agents: &str) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
-    for id in agents.split(',').map(str::trim).filter(|id| !id.is_empty()) {
+    for id in agents
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|id| !id.is_empty())
+    {
         if !ids.iter().any(|seen| seen == id) {
             ids.push(id.to_string());
         }
@@ -116,6 +120,10 @@ mod tests {
         assert_eq!(
             parse_list(" claude-code, cursor,,claude-code ,pi "),
             vec!["claude-code", "cursor", "pi"]
+        );
+        assert_eq!(
+            parse_list("codex cursor\tpi"),
+            vec!["codex", "cursor", "pi"]
         );
         assert!(parse_list("").is_empty());
         assert!(parse_list(" , ").is_empty());
