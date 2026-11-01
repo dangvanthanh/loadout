@@ -83,7 +83,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Provenance entries written on install/update, shown in History (remove entries come with uninstall, T5.4)
 
 ### M4 — Loadouts and agent awareness (U5, U7, U9)
-- ⬜ Create, apply, manage loadouts (including preferred agent)
+- ✅ Create, apply, manage loadouts (including preferred agent)
 - ⬜ Diff against loadout
 - ⬜ One-shot equip + launch
 - ⬜ Share and import via link or file

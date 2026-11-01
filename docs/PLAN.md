@@ -146,7 +146,7 @@ Simple log view in the popup (or a dedicated sheet). Filter by project optional.
 
 ## M4 — Loadouts and agent awareness (U5, U7, U9)
 
-### [ ] T4.1 Create / apply / manage loadouts
+### [x] T4.1 Create / apply / manage loadouts (2026-11-01)
 Named sets, preferred agent field, apply in one action. Suggest loadouts by stack tags.
 **Accept:** create "Web app", apply it; preferred agent is stored.
 

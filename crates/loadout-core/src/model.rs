@@ -182,6 +182,16 @@ pub fn parse_installed_key(key: &str) -> Option<(Option<Uuid>, Uuid)> {
     Some((project, Uuid::parse_str(favorite).ok()?))
 }
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum LoadoutError {
+    #[error("Give the loadout a name.")]
+    EmptyName,
+    #[error("There's already a loadout called {0}.")]
+    NameTaken(String),
+    #[error("Select at least one skill for the loadout.")]
+    NoSkills,
+}
+
 /// Outcome of `SavedState::add_favorites`, by display name.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Added {
@@ -369,6 +379,138 @@ impl SavedState {
         self.favorite_mut(id).map(|f| f.tags = tags).is_some()
     }
 
+    /// A new loadout of the existing favorites in `favorite_ids` (duplicates dropped, order kept).
+    pub fn create_loadout(
+        &mut self,
+        name: &str,
+        favorite_ids: &[Uuid],
+        tags: Vec<String>,
+    ) -> Result<Uuid, LoadoutError> {
+        let name = self.free_loadout_name(name, None)?;
+        let mut ids: Vec<Uuid> = Vec::new();
+        for id in favorite_ids {
+            if !ids.contains(id) && self.favorites.iter().any(|f| f.id == *id) {
+                ids.push(*id);
+            }
+        }
+        if ids.is_empty() {
+            return Err(LoadoutError::NoSkills);
+        }
+        let loadout = Loadout {
+            id: Uuid::new_v4(),
+            name,
+            favorite_ids: ids,
+            tags,
+            ..Default::default()
+        };
+        let id = loadout.id;
+        self.loadouts.push(loadout);
+        Ok(id)
+    }
+
+    /// `name` trimmed, if no other loadout (than `except`) has it.
+    fn free_loadout_name(&self, name: &str, except: Option<Uuid>) -> Result<String, LoadoutError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(LoadoutError::EmptyName);
+        }
+        match self
+            .loadouts
+            .iter()
+            .find(|l| Some(l.id) != except && l.name.eq_ignore_ascii_case(name))
+        {
+            Some(taken) => Err(LoadoutError::NameTaken(taken.name.clone())),
+            None => Ok(name.to_string()),
+        }
+    }
+
+    pub fn loadout(&self, id: Uuid) -> Option<&Loadout> {
+        self.loadouts.iter().find(|l| l.id == id)
+    }
+
+    fn loadout_mut(&mut self, id: Uuid) -> Option<&mut Loadout> {
+        self.loadouts.iter_mut().find(|l| l.id == id)
+    }
+
+    /// Names are unique, case-insensitively.
+    pub fn rename_loadout(&mut self, id: Uuid, name: &str) -> Result<(), LoadoutError> {
+        let name = self.free_loadout_name(name, Some(id))?;
+        if let Some(loadout) = self.loadout_mut(id) {
+            loadout.name = name;
+        }
+        Ok(())
+    }
+
+    pub fn set_loadout_tags(&mut self, id: Uuid, tags: Vec<String>) -> bool {
+        self.loadout_mut(id).map(|l| l.tags = tags).is_some()
+    }
+
+    /// `None` clears it. The id isn't checked here; see `agents::resolve`.
+    pub fn set_loadout_agent(&mut self, id: Uuid, agent: Option<String>) -> bool {
+        self.loadout_mut(id)
+            .map(|l| l.preferred_agent = agent)
+            .is_some()
+    }
+
+    /// Adds or removes one favorite; a loadout keeps at least one.
+    pub fn toggle_loadout_favorite(
+        &mut self,
+        id: Uuid,
+        favorite: Uuid,
+    ) -> Result<(), LoadoutError> {
+        let Some(loadout) = self.loadout_mut(id) else {
+            return Ok(());
+        };
+        match loadout.favorite_ids.iter().position(|f| *f == favorite) {
+            Some(_) if loadout.favorite_ids.len() == 1 => return Err(LoadoutError::NoSkills),
+            Some(index) => {
+                loadout.favorite_ids.remove(index);
+            }
+            None => loadout.favorite_ids.push(favorite),
+        }
+        Ok(())
+    }
+
+    pub fn remove_loadout(&mut self, id: Uuid) -> Option<Loadout> {
+        let index = self.loadouts.iter().position(|l| l.id == id)?;
+        Some(self.loadouts.remove(index))
+    }
+
+    /// The loadout's favorites that still exist, in its order.
+    pub fn loadout_favorites(&self, id: Uuid) -> Vec<&Favorite> {
+        self.loadout(id).map_or_else(Vec::new, |loadout| {
+            loadout
+                .favorite_ids
+                .iter()
+                .filter_map(|fav| self.favorites.iter().find(|f| f.id == *fav))
+                .collect()
+        })
+    }
+
+    /// Tags a loadout is suggested for: its own, or else the union of its skills' tags.
+    pub fn loadout_tags(&self, id: Uuid) -> Vec<String> {
+        let Some(loadout) = self.loadout(id) else {
+            return Vec::new();
+        };
+        if !loadout.tags.is_empty() {
+            return loadout.tags.clone();
+        }
+        let mut tags: Vec<String> = Vec::new();
+        for favorite in self.loadout_favorites(id) {
+            let own = if favorite.tags.is_empty() {
+                crate::tags::suggest_tags(favorite)
+            } else {
+                favorite.tags.clone()
+            };
+            for tag in own {
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        tags
+    }
+
     /// Also drops the favorite from loadouts and from install records.
     pub fn remove_favorite(&mut self, id: Uuid) -> Option<Favorite> {
         let index = self.favorites.iter().position(|f| f.id == id)?;
@@ -407,6 +549,100 @@ mod tests {
         state.mark_installed(Some(shop), pdf, None); // unknown version: never an update
         state.mark_installed(Some(shop), tdd, Some("same"));
         (state, fd, pdf, tdd, shop)
+    }
+
+    fn loadout_fixture() -> (SavedState, Uuid, Uuid, Uuid) {
+        let mut state = SavedState::default();
+        state.add_favorites(parse(
+            "npx skills add anthropics/skills --skill frontend-design --skill pdf",
+        ));
+        state.add_favorites(parse("mattpocock/skills@tdd"));
+        let ids = (
+            state.favorites[0].id,
+            state.favorites[1].id,
+            state.favorites[2].id,
+        );
+        (state, ids.0, ids.1, ids.2)
+    }
+
+    #[test]
+    fn create_loadout_validates() {
+        let (mut state, fd, _, tdd) = loadout_fixture();
+        let ghost = Uuid::new_v4();
+        let id = state
+            .create_loadout("  Web app ", &[fd, tdd, fd, ghost], vec!["nextjs".into()])
+            .unwrap();
+        let loadout = state.loadout(id).unwrap();
+        assert_eq!(loadout.name, "Web app");
+        assert_eq!(loadout.favorite_ids, [fd, tdd]);
+        assert_eq!(loadout.tags, ["nextjs"]);
+        assert_eq!(
+            state.create_loadout("web APP", &[fd], vec![]),
+            Err(LoadoutError::NameTaken("Web app".into()))
+        );
+        assert_eq!(
+            state.create_loadout(" ", &[fd], vec![]),
+            Err(LoadoutError::EmptyName)
+        );
+        assert_eq!(
+            state.create_loadout("Empty", &[ghost], vec![]),
+            Err(LoadoutError::NoSkills)
+        );
+        assert_eq!(state.loadouts.len(), 1);
+    }
+
+    #[test]
+    fn edit_loadouts() {
+        let (mut state, fd, pdf, tdd) = loadout_fixture();
+        let web = state.create_loadout("Web app", &[fd], vec![]).unwrap();
+        let docs = state.create_loadout("Docs", &[pdf], vec![]).unwrap();
+        assert_eq!(
+            state.rename_loadout(docs, "web app"),
+            Err(LoadoutError::NameTaken("Web app".into()))
+        );
+        assert_eq!(state.rename_loadout(web, "Web App"), Ok(()));
+        assert_eq!(state.rename_loadout(web, ""), Err(LoadoutError::EmptyName));
+        assert_eq!(state.loadout(web).unwrap().name, "Web App");
+
+        assert_eq!(state.toggle_loadout_favorite(web, tdd), Ok(()));
+        assert_eq!(state.loadout(web).unwrap().favorite_ids, [fd, tdd]);
+        assert_eq!(state.toggle_loadout_favorite(web, fd), Ok(()));
+        assert_eq!(
+            state.toggle_loadout_favorite(web, tdd),
+            Err(LoadoutError::NoSkills)
+        );
+        assert_eq!(state.loadout(web).unwrap().favorite_ids, [tdd]);
+
+        assert!(state.set_loadout_agent(web, Some("pi".into())));
+        assert_eq!(
+            state.loadout(web).unwrap().preferred_agent.as_deref(),
+            Some("pi")
+        );
+        assert_eq!(
+            state.remove_loadout(docs).map(|l| l.name),
+            Some("Docs".into())
+        );
+        assert!(state.loadout(docs).is_none());
+    }
+
+    #[test]
+    fn loadout_members_and_tags() {
+        let (mut state, fd, pdf, tdd) = loadout_fixture();
+        let web = state
+            .create_loadout("Web app", &[tdd, fd, pdf], vec![])
+            .unwrap();
+        state.remove_favorite(pdf);
+        let names: Vec<_> = state
+            .loadout_favorites(web)
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(names, ["tdd", "frontend-design"]);
+        // Untagged: the union of its skills' tags, in order.
+        assert_eq!(state.loadout_tags(web), ["testing", "frontend"]);
+        state.set_loadout_tags(web, vec!["nextjs".into()]);
+        assert_eq!(state.loadout_tags(web), ["nextjs"]);
+        assert!(state.loadout_tags(Uuid::new_v4()).is_empty());
     }
 
     #[test]

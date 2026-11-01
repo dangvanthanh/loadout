@@ -315,3 +315,20 @@ and is tested; short SHAs appear only for real tree SHAs. Remove entries arrive 
 already words them ("Removed tdd from blog").
 **Verified:** the History view rendered from a real `data.json`, and its line matched the stored entry (action,
 skill, project, tree SHA).
+
+## 038 — Loadouts: saved from the palette, managed in the popup
+**Choice:** ⌘S in the palette names the selection (favorites, plus the skills of any selected loadouts) as a new
+loadout, typed in place of the search; Return saves and Esc cancels. Its tags are the first two stack tags on the
+Into line, so it's suggested for projects like the one it came from. Names are unique (case-insensitive) and a
+loadout keeps at least one skill. Untagged loadouts are ranked by the union of their skills' tags.
+**Palette:** a Loadouts section between Suggested and Other favorites ("Web app · 2 skills · prefers Pi"). It's
+ranked like favorites but never pre-selected, because applying a set is a deliberate choice. Section labels now show
+when anything is suggested or any loadout is listed. Return applies a loadout through the same equip path: its
+skills expand into install/update jobs (skipping installed ones), each provenance entry carries `loadoutId` and
+"from Web app", and one `apply_loadout` entry records the apply itself. A loadout whose skills are all installed
+shows ✓.
+**Popup:** ⚙ → Loadouts lists them. Click one to tick its skills in or out. Right-click for Rename…, Preferred
+agent… (an id or a name like "Claude Code", resolved against `agents.rs`; unknown names are refused; empty clears
+it), Tags…, Remove.
+**Verified:** created "Web app" from a Next.js project, set its agent to "Pi", and applied it. Both skills
+installed with loadout-attributed entries and one apply entry.

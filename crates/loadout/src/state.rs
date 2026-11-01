@@ -8,7 +8,7 @@ use loadout_core::context::{self as signals, Context as Signals};
 use loadout_core::diff::{self, Changes};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
-use loadout_core::model::{Added, Favorite, Pending, SavedState, Uuid};
+use loadout_core::model::{Added, Favorite, Pending, ProvenanceEntry, SavedState, Uuid};
 use loadout_core::safety::{self, Report};
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
@@ -138,6 +138,8 @@ struct Job {
     /// `None` = home folder (global installs).
     dir: Option<PathBuf>,
     command: String,
+    /// The loadout being applied that brought this skill in.
+    loadout: Option<Uuid>,
 }
 
 enum JobEvent {
@@ -322,12 +324,30 @@ impl AppState {
             _ => None,
         };
         let dir = if global { None } else { root };
-        let jobs: Vec<Job> = self
-            .data
-            .favorites
+        // Loadouts expand into their skills; a skill keeps the first loadout that asked for it.
+        let mut wanted: Vec<(Uuid, Option<Uuid>)> = Vec::new();
+        for id in ids {
+            let members: Vec<(Uuid, Option<Uuid>)> = match self.data.loadout(*id) {
+                Some(loadout) => loadout
+                    .favorite_ids
+                    .iter()
+                    .map(|f| (*f, Some(*id)))
+                    .collect(),
+                None => vec![(*id, None)],
+            };
+            for (favorite, loadout) in members {
+                match wanted.iter_mut().find(|(f, _)| *f == favorite) {
+                    Some(entry) => entry.1 = entry.1.or(loadout),
+                    None => wanted.push((favorite, loadout)),
+                }
+            }
+        }
+        let jobs: Vec<Job> = wanted
             .iter()
-            .filter(|f| ids.contains(&f.id))
-            .filter_map(|f| {
+            .filter_map(|(id, loadout)| {
+                Some((self.data.favorites.iter().find(|f| f.id == *id)?, *loadout))
+            })
+            .filter_map(|(f, loadout)| {
                 let kind = if !self.is_installed_here(f.id) {
                     JobKind::Install
                 } else if self.update_here(f.id) {
@@ -341,6 +361,7 @@ impl AppState {
                     scope,
                     dir: dir.clone(),
                     command: self.command_for(f, global),
+                    loadout,
                 })
             })
             .collect();
@@ -507,6 +528,7 @@ impl AppState {
                 scope: p.project,
                 command: self.command_for(favorite, p.project.is_none()),
                 dir,
+                loadout: None,
             });
         }
         if jobs.is_empty() {
@@ -600,6 +622,7 @@ impl AppState {
                             this.target.installed = installed::read(&root, &ids);
                         }
                         this.installing = false;
+                        this.record_applied(&outcome.applied);
                         this.install_status = Some(outcome.summary(place.as_deref()).into());
                         this.save();
                         this.refresh_badge(cx);
@@ -646,6 +669,13 @@ impl AppState {
                 let mut entry = provenance::entry(action, job.dir.as_deref(), &job.favorite);
                 entry.tree_sha = version;
                 entry.agent = agent.map(str::to_string);
+                if let Some(loadout) = job.loadout.and_then(|id| self.data.loadout(id)) {
+                    entry.loadout_id = Some(loadout.id);
+                    entry.note = Some(format!("from {}", loadout.name));
+                    if !outcome.applied.iter().any(|(id, _)| *id == loadout.id) {
+                        outcome.applied.push((loadout.id, job.dir.clone()));
+                    }
+                }
                 provenance::append(&mut self.data, entry);
                 match job.kind {
                     JobKind::Install => outcome.installed.push(name),
@@ -662,6 +692,133 @@ impl AppState {
                 outcome.failed.push((name, job.kind));
             }
         }
+    }
+
+    /// One `apply_loadout` provenance entry per loadout a batch applied.
+    fn record_applied(&mut self, applied: &[(Uuid, Option<PathBuf>)]) {
+        for (id, dir) in applied {
+            let Some(loadout) = self.data.loadout(*id) else {
+                continue;
+            };
+            let entry = ProvenanceEntry {
+                id: Uuid::new_v4(),
+                ts: provenance::now(),
+                action: provenance::APPLY_LOADOUT.into(),
+                project_path: dir.as_ref().map(|d| d.to_string_lossy().into_owned()),
+                skill_source: loadout.name.clone(),
+                loadout_id: Some(loadout.id),
+                agent: loadout.preferred_agent.clone(),
+                ..Default::default()
+            };
+            provenance::append(&mut self.data, entry);
+        }
+    }
+
+    /// Saves `ids` (favorites, and loadouts' skills) as a new loadout, suggested for the current
+    /// stack. Feedback goes to the palette footer. True when saved.
+    pub fn create_loadout(&mut self, name: &str, ids: &[Uuid], cx: &mut Context<Self>) -> bool {
+        let mut favorites: Vec<Uuid> = Vec::new();
+        for id in ids {
+            match self.data.loadout(*id) {
+                Some(loadout) => favorites.extend(&loadout.favorite_ids),
+                None => favorites.push(*id),
+            }
+        }
+        // The Into line's stack, so the loadout is suggested for projects like this one.
+        let tags = self
+            .target
+            .stack
+            .iter()
+            .take(2)
+            .map(|t| t.tag.to_string())
+            .collect();
+        let result = self.data.create_loadout(name, &favorites, tags);
+        cx.notify();
+        match result {
+            Ok(id) => {
+                let count = self.data.loadout_favorites(id).len();
+                self.install_status = Some(
+                    format!(
+                        "Saved {} ({count} skill{})",
+                        name.trim(),
+                        if count == 1 { "" } else { "s" }
+                    )
+                    .into(),
+                );
+                self.save();
+                true
+            }
+            Err(err) => {
+                self.install_status = Some(err.to_string().into());
+                false
+            }
+        }
+    }
+
+    pub fn rename_loadout(&mut self, id: Uuid, name: &str, cx: &mut Context<Self>) {
+        match self.data.rename_loadout(id, name) {
+            Ok(()) => self.save(),
+            Err(err) => self.popup_notice = Some(err.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    pub fn set_loadout_tags(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
+        if self.data.set_loadout_tags(id, tags::parse_tags(text)) {
+            self.save();
+            cx.notify();
+        }
+    }
+
+    /// Accepts an agent id or name ("pi", "Claude Code"); empty clears it.
+    pub fn set_loadout_agent(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
+        let agent = match text.trim() {
+            "" => None,
+            text => match agents::resolve(text) {
+                Some(agent) => Some(agent.id.to_string()),
+                None => {
+                    self.popup_notice =
+                        Some("Unknown agent. Try pi, claude-code, cursor, or codex.".into());
+                    cx.notify();
+                    return;
+                }
+            },
+        };
+        if self.data.set_loadout_agent(id, agent) {
+            self.save();
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_loadout_favorite(&mut self, id: Uuid, favorite: Uuid, cx: &mut Context<Self>) {
+        match self.data.toggle_loadout_favorite(id, favorite) {
+            Ok(()) => self.save(),
+            Err(err) => self.popup_notice = Some(err.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    pub fn remove_loadout(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        if let Some(loadout) = self.data.remove_loadout(id) {
+            self.popup_notice = Some(format!("Removed {}", loadout.name).into());
+            self.save();
+            cx.notify();
+        }
+    }
+
+    /// "4 skills · prefers Pi" for loadout rows.
+    pub fn loadout_subtitle(&self, id: Uuid) -> String {
+        let count = self.data.loadout_favorites(id).len();
+        let mut text = format!("{count} skill{}", if count == 1 { "" } else { "s" });
+        if let Some(agent) = self
+            .data
+            .loadout(id)
+            .and_then(|l| l.preferred_agent.as_deref())
+        {
+            let name = agents::find(agent).map_or(agent, |a| a.name);
+            text += &format!(" · prefers {name}");
+        }
+        text
     }
 
     /// Fetches the latest versions of installed skills (one GitHub request per repo, off the
@@ -1155,6 +1312,8 @@ fn project_name(root: &std::path::Path) -> String {
 /// What a batch of jobs did, by skill name.
 #[derive(Default)]
 struct Outcome {
+    /// Loadouts with at least one skill installed or updated, and where.
+    applied: Vec<(Uuid, Option<PathBuf>)>,
     installed: Vec<String>,
     updated: Vec<String>,
     failed: Vec<(String, JobKind)>,

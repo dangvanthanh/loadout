@@ -104,9 +104,27 @@ pub fn project_dirs(ids: &[String]) -> Vec<&'static str> {
     dirs
 }
 
+/// An agent the user typed: its id or name, any case ("Claude Code", "pi").
+pub fn resolve(text: &str) -> Option<&'static Agent> {
+    let wanted = text.trim().to_lowercase().replace(' ', "-");
+    AGENTS
+        .iter()
+        .find(|a| a.id == wanted || a.name.to_lowercase().replace(' ', "-") == wanted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_ids_and_names() {
+        assert_eq!(resolve(" Pi ").unwrap().id, "pi");
+        assert_eq!(resolve("claude code").unwrap().id, "claude-code");
+        assert_eq!(resolve("CURSOR").unwrap().id, "cursor");
+        assert_eq!(resolve("Claude-Code").unwrap().id, "claude-code");
+        assert_eq!(resolve("vim"), None);
+        assert_eq!(resolve(""), None);
+    }
 
     #[test]
     fn finds_known_agents() {

@@ -30,20 +30,21 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
 }
 
-/// Window height for `favorites` rows: four to seven (room for a preview), then the list scrolls.
-pub fn height(favorites: usize) -> Pixels {
-    let list = if favorites == 0 {
+/// Window height for `rows` (favorites + loadouts): four to seven (room for a preview), then the
+/// list scrolls. Up to three section labels.
+pub fn height(rows: usize) -> Pixels {
+    let list = if rows == 0 {
         EMPTY_HEIGHT
     } else {
-        ROW_HEIGHT * favorites.clamp(MIN_ROWS, MAX_ROWS) as f32
-            + LABEL_HEIGHT * 2.
-            + LIST_PADDING * 2.
+        ROW_HEIGHT * rows.clamp(MIN_ROWS, MAX_ROWS) as f32 + LABEL_HEIGHT * 3. + LIST_PADDING * 2.
     };
     SEARCH_HEIGHT + INTO_HEIGHT + px(1.) + list + px(1.) + FOOTER_HEIGHT
 }
 
 struct Row {
+    /// A favorite's or a loadout's id.
     id: Uuid,
+    loadout: bool,
     name: SharedString,
     source: SharedString,
     suggested: bool,
@@ -62,15 +63,35 @@ impl Row {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Section {
+    Suggested,
+    Loadouts,
+    Other,
+}
+
+impl Row {
+    fn section(&self) -> Section {
+        match (self.loadout, self.suggested) {
+            (true, _) => Section::Loadouts,
+            (false, true) => Section::Suggested,
+            (false, false) => Section::Other,
+        }
+    }
+}
+
 /// What the list shows, in order: section labels and rows (index into `rows`).
 enum Entry {
-    Label { suggested: bool },
+    Label(Section),
     Row(usize),
 }
 
 pub struct Palette {
     state: Entity<AppState>,
     search: Entity<InputState>,
+    /// Shown in place of the search while naming a new loadout (⌘S).
+    name: Entity<InputState>,
+    naming: bool,
     rows: Vec<Row>,
     selected: HashSet<Uuid>,
     /// The user changed the selection; ranking updates no longer reset it.
@@ -88,7 +109,24 @@ impl Palette {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search favorites and loadouts"));
         search.update(cx, |search, cx| search.focus(window, cx));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name this loadout"));
         let _subscriptions = vec![
+            cx.subscribe_in(
+                &name,
+                window,
+                |this, name, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        let text = name.read(cx).value().to_string();
+                        let ids = this.chosen(cx);
+                        if this
+                            .state
+                            .update(cx, |state, cx| state.create_loadout(&text, &ids, cx))
+                        {
+                            this.stop_naming(window, cx);
+                        }
+                    }
+                },
+            ),
             cx.observe(&state, |this, _, cx| {
                 this.rebuild(cx);
                 cx.notify();
@@ -113,6 +151,8 @@ impl Palette {
         let mut palette = Self {
             state,
             search,
+            name,
+            naming: false,
             rows: Vec::new(),
             selected: HashSet::new(),
             touched: false,
@@ -130,26 +170,53 @@ impl Palette {
         let state = self.state.read(cx);
         let favorites = &state.data.favorites;
         let ranked = tags::rank_favorites(favorites, &state.target.stack, &state.target.signals);
-        self.rows = ranked
-            .iter()
-            .map(|s| {
-                let favorite = &favorites[s.index];
-                Row {
-                    id: favorite.id,
-                    name: favorite.name.clone().into(),
-                    source: favorite.source.clone().into(),
-                    suggested: s.score > 0,
-                    preselect: s.preselect(),
-                    installed: state.is_installed_here(favorite.id),
-                    update: state.update_here(favorite.id),
-                    findings: match state.scans.get(&favorite.id) {
-                        Some(Scan::Ready(scan)) if state.needs_glance(favorite.id) => {
-                            scan.report.summary().map(|s| capitalize(&s).into())
-                        }
-                        _ => None,
-                    },
-                }
-            })
+        let loadouts = &state.data.loadouts;
+        let ranked_loadouts = tags::rank(
+            loadouts.iter().map(|l| state.data.loadout_tags(l.id)),
+            &state.target.stack,
+            &state.target.signals,
+        );
+        let loadout_rows = ranked_loadouts.iter().map(|s| {
+            let loadout = &loadouts[s.index];
+            let members = &loadout.favorite_ids;
+            Row {
+                id: loadout.id,
+                loadout: true,
+                name: loadout.name.clone().into(),
+                source: state.loadout_subtitle(loadout.id).into(),
+                suggested: s.score > 0,
+                // Loadouts are suggested by rank, never pre-selected: applying one is a choice.
+                preselect: false,
+                installed: !members.is_empty()
+                    && members.iter().all(|f| state.is_installed_here(*f)),
+                update: members.iter().any(|f| state.update_here(*f)),
+                findings: None,
+            }
+        });
+        let favorite_rows = ranked.iter().map(|s| {
+            let favorite = &favorites[s.index];
+            Row {
+                id: favorite.id,
+                loadout: false,
+                name: favorite.name.clone().into(),
+                source: favorite.source.clone().into(),
+                suggested: s.score > 0,
+                preselect: s.preselect(),
+                installed: state.is_installed_here(favorite.id),
+                update: state.update_here(favorite.id),
+                findings: match state.scans.get(&favorite.id) {
+                    Some(Scan::Ready(scan)) if state.needs_glance(favorite.id) => {
+                        scan.report.summary().map(|s| capitalize(&s).into())
+                    }
+                    _ => None,
+                },
+            }
+        });
+        let (suggested, other): (Vec<Row>, Vec<Row>) = favorite_rows.partition(|r| r.suggested);
+        self.rows = suggested
+            .into_iter()
+            .chain(loadout_rows)
+            .chain(other)
             .collect();
         if self.touched {
             let ids: HashSet<Uuid> = self.rows.iter().map(|r| r.id).collect();
@@ -193,6 +260,9 @@ impl Palette {
 
     /// Shows `id`'s files and findings in the list area (or closes the preview).
     fn toggle_preview(&mut self, id: Option<Uuid>, cx: &mut Context<Self>) {
+        if id.is_some_and(|id| self.rows.iter().any(|r| r.id == id && r.loadout)) {
+            return;
+        }
         self.preview = if self.preview.is_some() && (id.is_none() || id == self.preview) {
             None
         } else {
@@ -221,19 +291,57 @@ impl Palette {
     }
 
     fn entries(&self, visible: &[usize]) -> Vec<Entry> {
-        let has_suggested = visible.iter().any(|&ix| self.rows[ix].suggested);
+        // Labels explain why something is suggested, or set loadouts apart; otherwise none.
+        let labeled = visible
+            .iter()
+            .any(|&ix| self.rows[ix].section() != Section::Other);
         let mut entries = Vec::new();
         let mut section = None;
         for &ix in visible {
-            let suggested = self.rows[ix].suggested;
-            // Labels only explain why something is suggested; no suggestions, no labels.
-            if has_suggested && section != Some(suggested) {
-                entries.push(Entry::Label { suggested });
-                section = Some(suggested);
+            let current = self.rows[ix].section();
+            if labeled && section != Some(current) {
+                entries.push(Entry::Label(current));
+                section = Some(current);
             }
             entries.push(Entry::Row(ix));
         }
         entries
+    }
+
+    /// Selected ids in list order, or the highlighted row's when nothing is selected.
+    fn chosen(&self, cx: &App) -> Vec<Uuid> {
+        let mut ids: Vec<Uuid> = self
+            .rows
+            .iter()
+            .filter(|r| self.selected.contains(&r.id))
+            .map(|r| r.id)
+            .collect();
+        if ids.is_empty()
+            && let Some(&ix) = self.visible(cx).get(self.highlight)
+        {
+            ids.push(self.rows[ix].id);
+        }
+        ids
+    }
+
+    /// ⌘S: name the selection as a loadout, typed in place of the search.
+    fn start_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.chosen(cx).is_empty() {
+            return;
+        }
+        self.naming = true;
+        self.name.update(cx, |name, cx| {
+            name.set_value("", window, cx);
+            name.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn stop_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.naming = false;
+        self.search
+            .update(cx, |search, cx| search.focus(window, cx));
+        cx.notify();
     }
 
     fn move_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -270,9 +378,22 @@ impl Palette {
     }
 
     /// Keys the palette owns before the search field sees them.
-    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let modifiers = event.keystroke.modifiers;
         let key = event.keystroke.key.as_str();
+        // While naming, keys belong to the name field; Esc cancels naming, not the palette.
+        if self.naming {
+            if key == "escape" {
+                self.stop_naming(window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if modifiers.platform && key == "s" {
+            self.start_naming(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         // ⌘Y previews, like Quick Look in Finder; Esc leaves a preview before closing.
         if modifiers.platform && key == "y" {
             let highlighted = self
@@ -306,17 +427,7 @@ impl Palette {
 
     /// Return: install (or update) the selection, or the highlighted row when nothing is selected.
     fn install(&mut self, cx: &mut Context<Self>) {
-        let mut ids: Vec<Uuid> = self
-            .rows
-            .iter()
-            .filter(|r| self.selected.contains(&r.id))
-            .map(|r| r.id)
-            .collect();
-        if ids.is_empty()
-            && let Some(&ix) = self.visible(cx).get(self.highlight)
-        {
-            ids.push(self.rows[ix].id);
-        }
+        let ids = self.chosen(cx);
         self.state.update(cx, |state, cx| state.equip(&ids, cx));
     }
 
@@ -348,6 +459,13 @@ impl Palette {
             .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
             .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
             .child(icon.small())
+            .when(row.loadout, |row| {
+                row.child(
+                    Icon::new(ExtraIcon::Layers)
+                        .xsmall()
+                        .text_color(theme.muted_foreground),
+                )
+            })
             .child(
                 div()
                     .id(("name", ix))
@@ -487,7 +605,7 @@ impl Render for Palette {
             None => entries
                 .iter()
                 .map(|entry| match entry {
-                    Entry::Label { suggested } => section_label(*suggested, &stack_label, cx),
+                    Entry::Label(section) => section_label(*section, &stack_label, cx),
                     Entry::Row(ix) => {
                         let highlighted = visible.get(self.highlight) == Some(ix);
                         self.render_row(*ix, highlighted, cx)
@@ -503,12 +621,21 @@ impl Render for Palette {
             .as_ref()
             .map(|n| (n.favorite, n.text.clone()));
         let theme = cx.theme();
+        let chosen = |r: &&Row| self.selected.contains(&r.id);
+        let loadouts: Vec<SharedString> = self
+            .rows
+            .iter()
+            .filter(chosen)
+            .filter(|r| r.loadout)
+            .map(|r| r.name.clone())
+            .collect();
         let updates = self
             .rows
             .iter()
-            .filter(|r| r.installed && self.selected.contains(&r.id))
+            .filter(chosen)
+            .filter(|r| !r.loadout && r.installed)
             .count();
-        let installs = self.selected.len() - updates;
+        let installs = self.selected.len() - updates - loadouts.len();
         let empty = self.rows.is_empty();
 
         div()
@@ -521,13 +648,29 @@ impl Render for Palette {
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(
-                div().h(SEARCH_HEIGHT).px_3().flex().items_center().child(
-                    Input::new(&self.search)
-                        .appearance(false)
-                        .large()
-                        .text_size(px(15.))
-                        .prefix(Icon::new(IconName::Search).text_color(theme.muted_foreground)),
-                ),
+                div()
+                    .h(SEARCH_HEIGHT)
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .when(!self.naming, |bar| {
+                        bar.child(
+                            Input::new(&self.search)
+                                .appearance(false)
+                                .large()
+                                .text_size(px(15.))
+                                .prefix(Icon::new(IconName::Search).text_color(theme.muted_foreground)),
+                        )
+                    })
+                    .when(self.naming, |bar| {
+                        bar.child(
+                            Input::new(&self.name)
+                                .appearance(false)
+                                .large()
+                                .text_size(px(15.))
+                                .prefix(Icon::new(ExtraIcon::Layers).text_color(theme.muted_foreground)),
+                        )
+                    }),
             )
             .child(into_line(&self.state.read(cx).target, &stack_label, cx))
             .child(div().h(px(1.)).bg(theme.border))
@@ -586,16 +729,19 @@ impl Render for Palette {
                     .gap_3()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(match (status, notice.is_some()) {
-                        (Some(status), _) => status,
-                        (None, true) => "↩ Install anyway".into(),
-                        (None, false) => return_hint(installs, updates),
+                    .child(match (self.naming, status, notice.is_some()) {
+                        (true, _, _) => "↩ Save as loadout".into(),
+                        (false, Some(status), _) => status,
+                        (false, None, true) => "↩ Install anyway".into(),
+                        (false, None, false) => return_hint(installs, updates, &loadouts),
                     })
                     .child(div().flex_1())
-                    .child(if self.preview.is_some() {
+                    .child(if self.naming {
+                        "esc cancel"
+                    } else if self.preview.is_some() {
                         "⌘Y or esc closes preview"
                     } else {
-                        "↑↓ move · space select · ⌘Y preview · esc close"
+                        "↑↓ move · space select · ⌘S save as loadout · esc close"
                     }),
             )
     }
@@ -624,7 +770,21 @@ pub fn update_pill(cx: &App) -> Div {
 }
 
 /// The footer's Return hint for what's selected.
-fn return_hint(installs: usize, updates: usize) -> SharedString {
+fn return_hint(installs: usize, updates: usize, loadouts: &[SharedString]) -> SharedString {
+    let skills_hint = skills_hint(installs, updates);
+    match loadouts {
+        [] => skills_hint,
+        [one] if installs + updates == 0 => format!("↩ Apply {one}").into(),
+        [one] => format!(
+            "↩ Apply {one} + {}",
+            skills_hint.trim_start_matches("↩ ").to_lowercase()
+        )
+        .into(),
+        many => format!("↩ Apply {} loadouts", many.len()).into(),
+    }
+}
+
+fn skills_hint(installs: usize, updates: usize) -> SharedString {
     let skills = |n: usize| {
         if n == 1 {
             "1 skill".to_string()
@@ -640,12 +800,14 @@ fn return_hint(installs: usize, updates: usize) -> SharedString {
     }
 }
 
-fn section_label(suggested: bool, stack_label: &str, cx: &App) -> AnyElement {
+fn section_label(section: Section, stack_label: &str, cx: &App) -> AnyElement {
     let theme = cx.theme();
-    let text: SharedString = match (suggested, stack_label.is_empty()) {
-        (true, false) => format!("Suggested for {stack_label}").into(),
-        (true, true) => "Suggested".into(),
-        (false, _) => "Other favorites".into(),
+    let suggested = section == Section::Suggested;
+    let text: SharedString = match (section, stack_label.is_empty()) {
+        (Section::Suggested, false) => format!("Suggested for {stack_label}").into(),
+        (Section::Suggested, true) => "Suggested".into(),
+        (Section::Loadouts, _) => "Loadouts".into(),
+        (Section::Other, _) => "Other favorites".into(),
     };
     div()
         .h(LABEL_HEIGHT)

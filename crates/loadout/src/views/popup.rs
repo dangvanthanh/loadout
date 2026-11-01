@@ -49,6 +49,9 @@ pub fn height(favorites: usize, updates: bool) -> Pixels {
 enum Field {
     Name,
     Tags,
+    LoadoutName,
+    LoadoutTags,
+    LoadoutAgent,
 }
 
 /// What the list area shows.
@@ -61,6 +64,9 @@ enum View {
     Changes(Uuid),
     /// Provenance, newest first.
     History(HistoryFilter),
+    Loadouts,
+    /// One loadout's skills, toggled by clicking.
+    Loadout(Uuid),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -98,6 +104,11 @@ impl Popup {
                 {
                     this.view = View::Favorites;
                 }
+                if let View::Loadout(id) = this.view
+                    && state.read(cx).data.loadout(id).is_none()
+                {
+                    this.view = View::Loadouts;
+                }
                 cx.notify();
             }),
             cx.subscribe_in(
@@ -123,6 +134,9 @@ impl Popup {
                             this.state.update(cx, |state, cx| match field {
                                 Field::Name => state.rename_favorite(id, &text, cx),
                                 Field::Tags => state.set_favorite_tags(id, &text, cx),
+                                Field::LoadoutName => state.rename_loadout(id, &text, cx),
+                                Field::LoadoutTags => state.set_loadout_tags(id, &text, cx),
+                                Field::LoadoutAgent => state.set_loadout_agent(id, &text, cx),
                             });
                         }
                         this.paste.update(cx, |paste, cx| paste.focus(window, cx));
@@ -157,19 +171,16 @@ impl Popup {
     }
 
     fn start_edit(&mut self, id: Uuid, field: Field, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(favorite) = self
-            .state
-            .read(cx)
-            .data
-            .favorites
-            .iter()
-            .find(|f| f.id == id)
-        else {
-            return;
-        };
-        let value = match field {
-            Field::Name => favorite.name.clone(),
-            Field::Tags => favorite.tags.join(", "),
+        let data = &self.state.read(cx).data;
+        let favorite = data.favorites.iter().find(|f| f.id == id);
+        let loadout = data.loadout(id);
+        let value = match (field, favorite, loadout) {
+            (Field::Name, Some(f), _) => f.name.clone(),
+            (Field::Tags, Some(f), _) => f.tags.join(", "),
+            (Field::LoadoutName, _, Some(l)) => l.name.clone(),
+            (Field::LoadoutTags, _, Some(l)) => l.tags.join(", "),
+            (Field::LoadoutAgent, _, Some(l)) => l.preferred_agent.clone().unwrap_or_default(),
+            _ => return,
         };
         self.editing = Some((id, field));
         self.edit.update(cx, |edit, cx| {
@@ -494,6 +505,203 @@ impl Popup {
 }
 
 impl Popup {
+    /// A back button and a title, for secondary views.
+    fn view_header(&self, title: SharedString, back: View, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .child(
+                Button::new("back")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::ArrowLeft)
+                    .tooltip("Back")
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_view(back, cx))),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(title),
+            )
+            .into_any_element()
+    }
+
+    /// Every loadout: click for its skills, right-click to rename, set the agent or tags, remove.
+    fn render_loadouts(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut items = vec![self.view_header("Loadouts".into(), View::Favorites, cx)];
+        let state = self.state.read(cx);
+        let theme = cx.theme();
+        if state.data.loadouts.is_empty() {
+            items.push(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child("No loadouts yet. Select skills in the palette (⌃⌥L) and press ⌘S to save them as one.")
+                    .into_any_element(),
+            );
+            return items;
+        }
+        let rows: Vec<(Uuid, String, String, Vec<String>)> = state
+            .data
+            .loadouts
+            .iter()
+            .map(|l| {
+                (
+                    l.id,
+                    l.name.clone(),
+                    state.loadout_subtitle(l.id),
+                    l.tags.clone(),
+                )
+            })
+            .collect();
+        for (ix, (id, name, subtitle, tags)) in rows.into_iter().enumerate() {
+            let editing = self
+                .editing
+                .filter(|(editing, _)| *editing == id)
+                .map(|(_, f)| f);
+            let subtitle = if tags.is_empty() {
+                subtitle
+            } else {
+                format!("{subtitle} · {}", tags.join(", "))
+            };
+            let theme = cx.theme();
+            let hover = theme.list_hover;
+            let this = cx.entity().downgrade();
+            let menu_item = move |label: &'static str, field: Option<Field>| {
+                let this = this.clone();
+                PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                    this.update(cx, |this, cx| match field {
+                        Some(field) => this.start_edit(id, field, window, cx),
+                        None => this
+                            .state
+                            .update(cx, |state, cx| state.remove_loadout(id, cx)),
+                    })
+                    .ok();
+                })
+            };
+            items.push(
+                div()
+                    .id(("loadout", ix))
+                    .h(ROW_HEIGHT)
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(7.))
+                    .hover(move |s| s.bg(hover))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.editing.is_none() {
+                            this.set_view(View::Loadout(id), cx)
+                        }
+                    }))
+                    .child(
+                        Icon::new(ExtraIcon::Layers)
+                            .small()
+                            .text_color(theme.muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(match editing {
+                                Some(Field::LoadoutName) => {
+                                    Input::new(&self.edit).small().into_any_element()
+                                }
+                                _ => div()
+                                    .text_size(px(13.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .truncate()
+                                    .child(name)
+                                    .into_any_element(),
+                            })
+                            .child(match editing {
+                                Some(Field::LoadoutTags | Field::LoadoutAgent) => {
+                                    Input::new(&self.edit).small().into_any_element()
+                                }
+                                _ => div()
+                                    .text_size(px(11.))
+                                    .text_color(theme.muted_foreground)
+                                    .truncate()
+                                    .child(subtitle)
+                                    .into_any_element(),
+                            }),
+                    )
+                    .context_menu(move |menu, _, _| {
+                        menu.item(menu_item("Rename…", Some(Field::LoadoutName)))
+                            .item(menu_item("Preferred agent…", Some(Field::LoadoutAgent)))
+                            .item(menu_item("Tags…", Some(Field::LoadoutTags)))
+                            .separator()
+                            .item(menu_item("Remove", None))
+                    })
+                    .into_any_element(),
+            );
+        }
+        items
+    }
+
+    /// Every favorite with a check for membership; clicking toggles it.
+    fn render_loadout_members(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let state = self.state.read(cx);
+        let Some(loadout) = state.data.loadout(id) else {
+            return Vec::new();
+        };
+        let title: SharedString = loadout.name.clone().into();
+        let members = loadout.favorite_ids.clone();
+        let favorites: Vec<(Uuid, String, String)> = state
+            .data
+            .favorites
+            .iter()
+            .map(|f| (f.id, f.name.clone(), f.source.clone()))
+            .collect();
+        let mut items = vec![self.view_header(title, View::Loadouts, cx)];
+        for (ix, (favorite, name, source)) in favorites.into_iter().enumerate() {
+            let theme = cx.theme();
+            let hover = theme.list_hover;
+            let icon = if members.contains(&favorite) {
+                Icon::new(IconName::CircleCheck).text_color(theme.primary)
+            } else {
+                Icon::new(ExtraIcon::Circle).text_color(theme.muted_foreground)
+            };
+            let state = self.state.clone();
+            items.push(
+                div()
+                    .id(("member", ix))
+                    .h(px(32.))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(7.))
+                    .hover(move |s| s.bg(hover))
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        state.update(cx, |s, cx| s.toggle_loadout_favorite(id, favorite, cx))
+                    })
+                    .child(icon.small())
+                    .child(div().text_size(px(13.)).truncate().child(name))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .max_w(px(140.))
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(theme.muted_foreground)
+                            .child(source),
+                    )
+                    .into_any_element(),
+            );
+        }
+        items
+    }
+
     /// Back, a title, the project toggle, and one line per entry.
     fn render_history(&self, filter: HistoryFilter, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
@@ -607,6 +815,8 @@ impl Render for Popup {
             View::Output => Vec::new(),
             View::Changes(id) => self.render_changes(id, cx),
             View::History(filter) => self.render_history(filter, cx),
+            View::Loadouts => self.render_loadouts(cx),
+            View::Loadout(id) => self.render_loadout_members(id, cx),
         };
         let theme = cx.theme();
         let state = self.state.read(cx);
@@ -751,9 +961,14 @@ impl Render for Popup {
                                 let this = cx.entity().downgrade();
                                 move |menu, _, _| {
                                     let item = |label: &'static str| PopupMenuItem::new(label);
-                                    let (this, history) = (this.clone(), this.clone());
+                                    let (this, history, loadouts) = (this.clone(), this.clone(), this.clone());
                                     let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
-                                    menu.when(has_history, |menu| {
+                                    menu.item(item("Loadouts").on_click(move |_, _, cx| {
+                                        loadouts
+                                            .update(cx, |this, cx| this.set_view(View::Loadouts, cx))
+                                            .ok();
+                                    }))
+                                    .when(has_history, |menu| {
                                         menu.item(item("History").on_click(move |_, _, cx| {
                                             history
                                                 .update(cx, |this, cx| {
