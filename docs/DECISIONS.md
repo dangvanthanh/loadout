@@ -221,3 +221,11 @@ footer shows "Installing tdd…" → "Installed 2 skills in shop-dashboard" / "C
 popup shows the same status and a Log toggle.
 **Verified:** a real `frontend-design` install into a temp project wrote the skill folder, `skills-lock.json`, the
 `installed` record, and the provenance entry.
+
+## 029 — What counts as installed
+**Choice:** `installed::read` merges `skills-lock.json` (name → source) with the skill folders of the configured
+agents (every known agent's folder when `agents` is empty); a subfolder with a SKILL.md counts. A named favorite is
+installed when its normalized name is there and the lock's source, if any, is the same GitHub repo. A whole-source
+favorite is installed when the lock attributes any skill to that repo. Loadout's own `installed` records also count.
+The palette shows a muted ✓, never pre-selects or toggles those rows, and Return skips them. The set is read with
+detection (background) and again after each install batch. Global installs rely on records only for now.

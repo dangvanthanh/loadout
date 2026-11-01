@@ -44,6 +44,7 @@ struct Row {
     source: SharedString,
     suggested: bool,
     preselect: bool,
+    installed: bool,
 }
 
 /// What the list shows, in order: section labels and rows (index into `rows`).
@@ -122,6 +123,7 @@ impl Palette {
                     source: favorite.source.clone().into(),
                     suggested: s.score > 0,
                     preselect: s.preselect(),
+                    installed: state.is_installed_here(favorite.id),
                 }
             })
             .collect();
@@ -137,7 +139,13 @@ impl Palette {
                 .collect();
         }
         // Installed skills are skipped, so they're never part of the selection.
-        self.selected.retain(|id| !state.is_installed_here(*id));
+        let installed: HashSet<Uuid> = self
+            .rows
+            .iter()
+            .filter(|r| r.installed)
+            .map(|r| r.id)
+            .collect();
+        self.selected.retain(|id| !installed.contains(id));
     }
 
     /// Visible row indexes for the current query.
@@ -187,6 +195,9 @@ impl Palette {
     }
 
     fn toggle(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        if self.rows.iter().any(|r| r.id == id && r.installed) {
+            return;
+        }
         self.touched = true;
         if !self.selected.remove(&id) {
             self.selected.insert(id);
@@ -278,6 +289,13 @@ impl Palette {
                     .text_color(theme.muted_foreground)
                     .child(row.source.clone()),
             )
+            .when(row.installed, |row| {
+                row.child(
+                    Icon::new(IconName::Check)
+                        .small()
+                        .text_color(theme.muted_foreground),
+                )
+            })
             .into_any_element()
     }
 }

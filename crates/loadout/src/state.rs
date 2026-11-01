@@ -3,10 +3,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use gpui_kit::*;
+use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
 use loadout_core::model::{Added, Favorite, SavedState, Uuid};
 use loadout_core::stack::{self, StackTag};
-use loadout_core::{parser, project, provenance, storage, tags, ui_skills};
+use loadout_core::{agents, parser, project, provenance, storage, tags, ui_skills};
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
 use crate::macos::login_item::{self, LoginItem};
@@ -23,6 +24,8 @@ pub struct Target {
     pub notice: Option<SharedString>,
     pub detecting: bool,
     pub stack: Vec<StackTag>,
+    /// Skills already in the project, from its lock file and agent folders.
+    pub installed: Installed,
 }
 
 pub struct AppState {
@@ -136,10 +139,21 @@ impl AppState {
             .map(|p| p.id)
     }
 
-    /// Whether Loadout recorded installing `favorite` into the current target.
+    /// Whether `favorite` is in the current target: recorded by Loadout, or found in the
+    /// project's lock file / agent folders.
     pub fn is_installed_here(&self, favorite: Uuid) -> bool {
         let global = self.data.settings.global;
-        (global || self.target.root.is_some()) && self.data.is_installed(self.scope(), favorite)
+        if !global && self.target.root.is_none() {
+            return false;
+        }
+        self.data.is_installed(self.scope(), favorite)
+            || (!global
+                && self
+                    .data
+                    .favorites
+                    .iter()
+                    .find(|f| f.id == favorite)
+                    .is_some_and(|f| self.target.installed.contains(f)))
     }
 
     fn push_log(&mut self, line: impl Into<SharedString>) {
@@ -177,7 +191,7 @@ impl AppState {
             .data
             .favorites
             .iter()
-            .filter(|f| ids.contains(&f.id) && !self.data.is_installed(scope, f.id))
+            .filter(|f| ids.contains(&f.id) && !self.is_installed_here(f.id))
             .cloned()
             .collect();
         if todo.is_empty() {
@@ -258,6 +272,10 @@ impl AppState {
                         }
                     }
                     if finished {
+                        if let Some(root) = dir.as_deref() {
+                            let ids = agents::parse_list(&this.data.settings.agents);
+                            this.target.installed = installed::read(root, &ids);
+                        }
                         this.installing = false;
                         this.install_status =
                             Some(install_summary(&installed, &failed, npx_missing, &place).into());
@@ -284,6 +302,7 @@ impl AppState {
             ..Default::default()
         };
         cx.notify();
+        let agent_ids = agents::parse_list(&self.data.settings.agents);
         let task = cx.background_executor().spawn({
             let app = app.clone();
             async move {
@@ -295,14 +314,19 @@ impl AppState {
                     _ => fallback,
                 };
                 let stack = root.as_deref().map(stack::detect).unwrap_or_default();
-                (detection, root, stack)
+                let installed = root
+                    .as_deref()
+                    .map(|root| installed::read(root, &agent_ids))
+                    .unwrap_or_default();
+                (detection, root, stack, installed)
             }
         });
         // Replacing the task cancels a detection still running for an earlier palette.
         self._detect = Some(cx.spawn(async move |this, cx| {
-            let (detection, root, stack) = task.await;
+            let (detection, root, stack, installed) = task.await;
             this.update(cx, |this, cx| {
                 this.apply_detection(app.as_ref(), detection, root, stack);
+                this.target.installed = installed;
                 cx.notify();
             })
             .ok();

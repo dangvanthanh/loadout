@@ -114,7 +114,7 @@ Return installs selected skills via official CLI into the target project. Skip a
 Write provenance.
 **Accept:** installing a known skill creates the expected agent folders / lock entries; provenance has an entry.
 
-### [ ] T2.4 Installed state
+### [x] T2.4 Installed state (2026-10-31)
 Detect skills already present (lock file + agent folders) so the palette shows checkmarks and skips them.
 **Accept:** previously installed skills show as installed without Loadout having done the install.
 

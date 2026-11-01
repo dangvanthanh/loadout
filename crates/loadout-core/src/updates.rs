@@ -53,7 +53,12 @@ pub enum UpdateError {
 
 /// GitHub owner/repo (and folder) for a favorite; `None` for non-GitHub sources.
 pub fn skill_ref(favorite: &Favorite) -> Option<SkillRef> {
-    let source = favorite.source.trim();
+    source_ref(&favorite.source)
+}
+
+/// GitHub owner/repo (and folder) for a source string.
+pub fn source_ref(source: &str) -> Option<SkillRef> {
+    let source = source.trim();
     if is_shorthand(source) {
         let (owner, name) = source.split_once('/')?;
         return Some(SkillRef {
@@ -192,7 +197,7 @@ pub fn skill_dir<'a>(favorite: &Favorite, skill_ref: &SkillRef, tree: &'a Tree) 
         .map(String::as_str)
 }
 
-fn normalize(name: &str) -> String {
+pub(crate) fn normalize(name: &str) -> String {
     name.trim().to_lowercase().replace(' ', "-")
 }
 
