@@ -1,53 +1,39 @@
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{ActiveTheme, Theme};
+mod hotkey;
+mod macos;
+mod views;
+mod windows;
+
+use std::time::Duration;
+
+use gpui_kit::assets::Assets;
+use gpui_kit::component::Theme;
 use gpui_kit::*;
 
-struct Hello {
-    input: Entity<InputState>,
-    _appearance: Subscription,
-}
+actions!(loadout, [Quit]);
 
-impl Hello {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
-        let _appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
-        });
-        Self { input, _appearance }
-    }
-}
-
-impl Render for Hello {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_4()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .child(Input::new(&self.input))
-            .child(Button::new("install").primary().label("Install"))
-    }
-}
+/// How often the hotkey receiver is drained; cheap and never redraws.
+const HOTKEY_POLL: Duration = Duration::from_millis(50);
 
 fn main() {
-    gpui_kit::application().run(|cx| {
+    gpui_kit::application().with_assets(Assets).run(|cx| {
         gpui_kit::init(cx);
+        cx.set_activation_policy(ActivationPolicy::Accessory);
         Theme::sync_system_appearance(None, cx);
-        let bounds = Bounds::centered(None, size(px(520.), px(360.)), cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            ..Default::default()
-        };
-        // Startup invariant: without a window there is nothing to run.
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| Hello::new(window, cx))
+
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        views::palette::init(cx);
+
+        // Startup invariant: without the hotkey the palette is unreachable.
+        let hotkey = hotkey::Hotkey::register(hotkey::DEFAULT).expect("register global hotkey");
+        cx.spawn(async move |cx| {
+            loop {
+                cx.background_executor().timer(HOTKEY_POLL).await;
+                if hotkey.pressed() {
+                    cx.update(windows::toggle_palette);
+                }
+            }
         })
-        .expect("failed to open window");
-        cx.activate(true);
+        .detach();
     });
 }

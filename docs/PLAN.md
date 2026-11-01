@@ -31,7 +31,7 @@ Answer the questions that could change the architecture before writing features.
 - Show a 520×360 window with a GPUI Kit `Input` and `Button`, following the system light/dark appearance.
 **Accept:** `cargo run -p loadout` opens the window; switching macOS appearance switches the theme.
 
-### [ ] T0.2 Global hotkey and palette window (spike for the main surface)
+### [x] T0.2 Global hotkey and palette window (spike for the main surface) (2026-10-31)
 - `hotkey.rs` with the `global-hotkey` crate: ⌃⌥L by default. Poll its receiver from a GPUI timer.
 - Open/close a borderless floating palette window centered on the active screen; focus its input; Esc and blur close it.
 - Activation policy Accessory (no Dock icon).

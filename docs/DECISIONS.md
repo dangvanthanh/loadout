@@ -97,3 +97,11 @@ line. GPUI's `runtime_shaders` feature isn't needed: the Metal step builds with 
 pin keeps the GPUI flavor stable for the objc2 glue and any future tray crate.
 **Note:** GPUI Kit doesn't follow system appearance by itself; each window calls `Theme::sync_system_appearance`
 from `observe_window_appearance`.
+
+## 018 — The palette is a non-activating panel
+**Choice:** The palette opens as GPUI `WindowKind::PopUp` (an `NSPanel` with `NonactivatingPanel`, popup level),
+titlebar `None`, on the screen AppKit calls `mainScreen` (the one with the frontmost app's key window). Esc and blur
+remove the window; the app policy is `Accessory`. ⌘Q quits while the palette has focus (no menu bar).
+**Why:** Like Spotlight, the panel takes keyboard focus without activating Loadout, so the previous app stays
+frontmost: focus returns by itself on close, and T0.3 can read the frontmost app without racing our own activation.
+The hotkey receiver is polled every 50 ms from a GPUI timer (no redraws).
