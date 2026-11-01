@@ -83,7 +83,7 @@ streaming and ANSI stripping. Missing `npx` → typed error.
 `project.rs`, `stack.rs`. Walk up for `.git` / `package.json` / `Cargo.toml` / etc. Detect common stacks with evidence.
 **Accept:** fixture projects produce the expected root and stack tags.
 
-### [ ] T1.5 Context signals + ranking (U2)
+### [x] T1.5 Context signals + ranking (U2) (2026-10-31)
 `context.rs`, extend `tags.rs`. Lightweight signals (recent files when available, simple git status presence). Rank
 matching favorites higher; keep the ranking deterministic and tested.
 **Accept:** ranking tests show stack matches first, then context boosts, then others.

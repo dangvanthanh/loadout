@@ -168,3 +168,12 @@ everything. `stack::detect` reads root manifests only: package.json dependency k
 (line scan, no toml crate), whole-word package names in Python manifests, plus go.mod / Gemfile / composer.json /
 pubspec.yaml / Package.swift / Dockerfile. Order is fixed per ecosystem (frameworks and libraries, then the
 language), so ranking can rely on it. Each tag carries its evidence ("next in package.json").
+
+## 024 — Ranking formula and context signals
+**Choice:** `tags::rank` scores each item 100 per tag in the stack (plus implied tags: React → frontend,
+Prisma → database, Vitest → testing, …) and 10 per tag in the context, then sorts stably. Ties keep the user's order,
+so the result is deterministic. Only stack matches are pre-selected; context boosts order but never selects. Favorites
+with no tags use `suggest_tags` (keyword table over name, skill, and source words) at rank time, so prototype imports
+rank well. `context::gather` takes the editor's open file, `git status --porcelain -uall`, and the 20 newest files
+from a bounded walk (depth 4, 3000 entries, skipping `node_modules`, `target`, …). Each path maps to
+testing / frontend / database / devops / docs / language tags. Every source is optional (DECISIONS 016).
