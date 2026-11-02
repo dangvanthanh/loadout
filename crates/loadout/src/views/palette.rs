@@ -15,31 +15,23 @@ use crate::state::{AppState, Scan, Target};
 actions!(palette, [Dismiss]);
 
 const CONTEXT: &str = "Palette";
-pub const WIDTH: Pixels = px(520.);
-const SEARCH_HEIGHT: Pixels = px(44.);
-const INTO_HEIGHT: Pixels = px(28.);
-const FOOTER_HEIGHT: Pixels = px(28.);
-const ROW_HEIGHT: Pixels = px(36.);
-const LABEL_HEIGHT: Pixels = px(24.);
-const LIST_PADDING: Pixels = px(6.);
-const EMPTY_HEIGHT: Pixels = px(40.);
-const NOTICE_HEIGHT: Pixels = px(28.);
-const MIN_ROWS: usize = 4;
-const MAX_ROWS: usize = 7;
+/// Tinycast's palette size (DECISIONS 047): fixed, so the window never jumps as rows change.
+pub const WIDTH: Pixels = px(750.);
+pub const HEIGHT: Pixels = px(475.);
+/// Where the palette's top edge sits, as a fraction of the screen's visible height.
+pub const TOP_FRACTION: f32 = 0.18;
+const SEARCH_HEIGHT: Pixels = px(56.);
+const INTO_HEIGHT: Pixels = px(32.);
+const FOOTER_HEIGHT: Pixels = px(40.);
+const ROW_HEIGHT: Pixels = px(40.);
+const LABEL_HEIGHT: Pixels = px(26.);
+const LIST_PADDING: Pixels = px(8.);
+const NOTICE_HEIGHT: Pixels = px(32.);
+/// Room for a skill's source on the right of a row.
+const SOURCE_WIDTH: Pixels = px(340.);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
-}
-
-/// Window height for `rows` (favorites + loadouts): four to seven (room for a preview), then the
-/// list scrolls. Up to three section labels.
-pub fn height(rows: usize) -> Pixels {
-    let list = if rows == 0 {
-        EMPTY_HEIGHT
-    } else {
-        ROW_HEIGHT * rows.clamp(MIN_ROWS, MAX_ROWS) as f32 + LABEL_HEIGHT * 3. + LIST_PADDING * 2.
-    };
-    SEARCH_HEIGHT + INTO_HEIGHT + px(1.) + list + px(1.) + FOOTER_HEIGHT
 }
 
 struct Row {
@@ -676,7 +668,7 @@ impl Palette {
             .child(div().flex_1())
             .child(
                 div()
-                    .max_w(px(220.))
+                    .max_w(SOURCE_WIDTH)
                     .truncate()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
@@ -799,7 +791,7 @@ impl Palette {
                     .child(div().flex_1())
                     .child(
                         div()
-                            .max_w(px(260.))
+                            .max_w(SOURCE_WIDTH)
                             .truncate()
                             .text_size(px(11.))
                             .text_color(theme.muted_foreground)
@@ -864,7 +856,7 @@ impl Palette {
                 .child(div().flex_1())
                 .child(
                     div()
-                        .max_w(px(220.))
+                        .max_w(SOURCE_WIDTH)
                         .truncate()
                         .text_size(px(11.))
                         .child(trailing),
@@ -917,7 +909,7 @@ impl Palette {
                     .child(div().flex_1())
                     .child(
                         div()
-                            .max_w(px(220.))
+                            .max_w(SOURCE_WIDTH)
                             .truncate()
                             .text_size(px(11.))
                             .text_color(theme.muted_foreground)
@@ -1134,7 +1126,7 @@ impl Render for Palette {
                             Input::new(&self.search)
                                 .appearance(false)
                                 .large()
-                                .text_size(px(15.))
+                                .text_size(px(17.))
                                 .prefix(Icon::new(IconName::Search).text_color(theme.muted_foreground)),
                         )
                     })
@@ -1143,7 +1135,7 @@ impl Render for Palette {
                             Input::new(&self.name)
                                 .appearance(false)
                                 .large()
-                                .text_size(px(15.))
+                                .text_size(px(17.))
                                 .prefix(Icon::new(ExtraIcon::Layers).text_color(theme.muted_foreground)),
                         )
                     }),

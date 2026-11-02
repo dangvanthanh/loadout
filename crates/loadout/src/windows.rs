@@ -37,19 +37,21 @@ fn open_palette(state: Entity<AppState>, cx: &mut App) -> Result<AnyWindowHandle
     let display = display_id
         .and_then(|id| cx.find_display(id))
         .or_else(|| cx.primary_display());
-    let rows = {
-        let data = &state.read(cx).data;
-        data.favorites.len() + data.loadouts.len()
+    // Tinycast-sized, shrunk to fit small screens; centred, top edge 18% down the visible area.
+    let (size, origin) = match display.as_ref().map(|display| display.visible_bounds()) {
+        Some(visible) => {
+            let size = size(
+                palette::WIDTH.min(visible.size.width - px(40.)),
+                palette::HEIGHT.min(visible.size.height - px(40.)),
+            );
+            let top = visible.origin.y + visible.size.height * palette::TOP_FRACTION;
+            // Keep the bottom on screen when the visible area is short.
+            let top = top.min(visible.origin.y + visible.size.height - size.height);
+            let left = visible.origin.x + (visible.size.width - size.width) / 2.;
+            (size, point(left, top))
+        }
+        None => (size(palette::WIDTH, palette::HEIGHT), point(px(0.), px(0.))),
     };
-    let size = size(palette::WIDTH, palette::height(rows));
-    // Centered horizontally, vertically centered at 1/3 of the screen (display-relative).
-    let origin = display.as_ref().map_or(point(px(0.), px(0.)), |display| {
-        let screen = display.bounds().size;
-        point(
-            (screen.width - size.width) / 2.,
-            screen.height / 3. - size.height / 2.,
-        )
-    });
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds { origin, size })),
         titlebar: None,

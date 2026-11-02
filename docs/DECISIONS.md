@@ -460,3 +460,15 @@ slice is a valid x86_64 executable but wasn't run: this Mac has no Rosetta.
 - Before going public: a real bundle id instead of `local.loadout.app`. Changing it later resets macOS permissions,
   the login item, and the Keychain token, so decide once. The trademark/name check from 011 is still open too.
 - A clean-Mac install test of the cask.
+
+## 047 — Window sizes: Tinycast's palette, a wider popup
+**Choice:** The palette is 750 × 475 pt (Tinycast's `panelWidth` / `panelHeight`), at a fixed height instead of
+growing with the row count, centered with its top edge 18% down the visible screen (Tinycast's
+`paletteTopMarginFraction`), and shrunk to fit screens smaller than that. Rows and bars grew with it: search 56 pt
+(17 pt text), Into line 32, rows 40, labels 26, footer 40. A row's source column can use 340 pt, so
+`vercel-labs/agent-skills` no longer truncates. The popup is 400 pt wide (was 340). Tinycast's own menu bar item is a
+native menu, so there's no size to copy for it; 400 fits a name, its source, and the Update pill on one row, and gives
+the diff and history views room.
+**Why:** At 520 pt the palette cut off sources and crowded previews and diffs; the owner asked for widths like
+Tinycast's.
+**Verified:** the window server reported the palette at 750 × 476 (a 1 pt border rounding) and the popup at 400 wide.

@@ -18,7 +18,8 @@ use crate::windows;
 actions!(popup, [Dismiss]);
 
 const CONTEXT: &str = "Popup";
-pub const WIDTH: Pixels = px(340.);
+/// Wide enough for a name, its source, and the Update pill on one row (DECISIONS 047).
+pub const WIDTH: Pixels = px(400.);
 const PADDING: Pixels = px(14.);
 const INPUT_HEIGHT: Pixels = px(30.);
 const NOTICE_HEIGHT: Pixels = px(18.);
@@ -940,7 +941,7 @@ impl Popup {
                     .child(div().flex_1())
                     .child(
                         div()
-                            .max_w(px(170.))
+                            .max_w(px(210.))
                             .truncate()
                             .text_size(px(11.))
                             .text_color(muted)
@@ -1007,7 +1008,7 @@ impl Popup {
                     .child(div().flex_1())
                     .child(
                         div()
-                            .max_w(px(140.))
+                            .max_w(px(180.))
                             .truncate()
                             .text_size(px(11.))
                             .text_color(theme.muted_foreground)

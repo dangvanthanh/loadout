@@ -98,48 +98,55 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 
 ## Screens
 
-### Palette (⌃⌥L) — the main surface, 520 pt wide
+### Palette (⌃⌥L) — the main surface, 750 × 475 pt
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ ⌕ Search favorites and loadouts                      │
-│ Into: shop-dashboard · Next.js, Tailwind   from Zed ⌄│
-├──────────────────────────────────────────────────────┤
-│ Suggested                                            │
-│ ◉ frontend-design      anthropics/skills             │
-│ ◉ vercel-react-best-practices   vercel-labs/…     ✓  │
-│ Loadouts                                             │
-│ ○ Web app · 4 skills · prefers Pi                    │
-│ Other favorites                                      │
-│ ○ tdd                  mattpocock/skills             │
-│ ○ swiftui-patterns     …                             │
-├──────────────────────────────────────────────────────┤
-│ ↩ Install 1 skill   ⌘↩ Install + launch   esc        │
-└──────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ ⌕ Search favorites and loadouts                                                │
+│ Into: shop-dashboard · Next.js, Tailwind                              from Zed │
+├────────────────────────────────────────────────────────────────────────────────┤
+│ ✦ Suggested for Next.js, Tailwind                                              │
+│ ◉ frontend-design                                       anthropics/skills      │
+│ ◉ vercel-react-best-practices                  vercel-labs/agent-skills    ✓   │
+│ Loadouts                                                                       │
+│ ○ ≡ Web app                                     4 skills · prefers Pi          │
+│ Other favorites                                                                │
+│ ○ tdd                                                   mattpocock/skills      │
+│ ○ deploy-helper                                  acme/ops        ⚠   Update    │
+│                                                                                │
+├────────────────────────────────────────────────────────────────────────────────┤
+│ ↩ Install 1 skill · ⌘↩ + open Pi           ↑↓ move · space select · ⌘P project │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- Typing filters. ↑↓ move, Space toggles, Return installs selected (already-installed ones are skipped).
-- ⌘↩ (or a small checkbox) = Install + launch preferred agent when a loadout declares one.
-- "Into" line: click (or ⌘P) to switch project or choose Global.
+- Fixed size, like Tinycast's palette (750 × 475 pt, top edge 18% down the screen), so it never jumps as rows
+  change; the list area also holds the preview (⌘Y), diff against loadout (⌘D), and project chooser (⌘P).
+- Typing filters. ↑↓ move, Space/Tab toggles, Return installs selected (already-installed ones are skipped).
+- ⌘↩ = install + open the preferred agent. ⌘S saves the selection as a loadout. ⌘⌫ twice uninstalls.
+- "Into" line: ⌘P to switch project or choose Global.
 - Section labels here are the one exception to "no section titles": they explain *why* something is selected.
-- Diff against loadout is available from the loadout row (right-click or ⌘D).
 
-### Menu bar popup — 340 pt, for glancing and managing
+### Menu bar popup — 400 pt, for glancing and managing
 
 ```
-┌────────────────────────────────────┐
-│ shop-dashboard ⌄            ↻   ⚙ │
-│ ┌────────────────────────────────┐ │
-│ │ + Paste a link or owner/repo   │ │
-│ └────────────────────────────────┘ │
-│ ◉ frontend-design         Update   │
-│   anthropics/skills                │
-│ ○ skill-creator               ✓    │
-│ • 1 update available   Update all  │
-│ [        Install 1 skill         ] │
-│ Checked 4 minutes ago          Log │
-└────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ Into: shop-dashboard ⌄                   │
+│ ┌──────────────────────────────────────┐ │
+│ │ + Paste a link or owner/repo         │ │
+│ └──────────────────────────────────────┘ │
+│ Added pdf                                │
+│ frontend-design                 Update   │
+│ anthropics/skills · frontend             │
+│ tdd                                   📌 │
+│ mattpocock/skills · testing              │
+│ • 1 update available         Update all  │
+├──────────────────────────────────────────┤
+│ Checked 4 minutes ago               ↻  ⚙ │
+└──────────────────────────────────────────┘
 ```
+
+- Installing happens in the palette; the popup adds and manages favorites, shows updates and what changed, and
+  holds loadouts, history, output, and settings (⚙ menu) in its list area.
 
 ### Row interactions (both surfaces)
 Click: toggle. Click name: preview. Right-click: Install only this / Update · What changed · Diff against loadout · Pin · Tags… · Copy install command · Rename… · Remove · View provenance.

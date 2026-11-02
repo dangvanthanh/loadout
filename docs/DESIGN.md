@@ -5,7 +5,8 @@ When in doubt, remove it.
 
 ## Rules
 
-1. **One primary action per view.** Palette: Return = install. Popup: the Install button. Nothing else looks primary.
+1. **One primary action per view.** Palette: Return = install. Popup: Update all (only when updates exist).
+   Nothing else looks primary.
 2. **Explain selections, not chrome.** No decorative titles. The palette's section labels (Suggested, Loadouts, Other)
    exist only because they explain *why* something is pre-selected.
 3. **Keyboard first in the palette.** Everything reachable with ↑↓, Space, Return, ⌘↩ (equip + launch), ⌘P, ⌘D (diff), Esc. Show hints in the footer.
@@ -22,22 +23,22 @@ When in doubt, remove it.
 
 | Token | Value |
 |---|---|
-| Palette | 520 px wide, max 440 px tall, radius 12, centered on the active screen at 1/3 height |
-| Palette search | 44 px tall, 15 px text, no border, leading search icon |
-| Palette "Into" line | 28 px, 12 px muted text, target name in foreground |
-| Palette row | 36 px, radius 6, highlighted row uses list-active color |
-| Palette footer | 28 px, 11 px muted key hints |
-| Popup | 340 px wide, padding 14 |
+| Palette | 750 × 475 pt, fixed (Tinycast's size), centered on the active screen, top edge 18% down; shrinks to fit small screens |
+| Palette search | 56 px tall, 17 px text, no border, leading search icon |
+| Palette "Into" line | 32 px, 12 px muted text, target name in foreground |
+| Palette row | 40 px, radius 6, highlighted row uses list-active color; source column up to 340 px |
+| Palette footer | 40 px, 11 px muted key hints |
+| Popup | 400 px wide, padding 14, height follows content (4–7 rows) |
 | Popup row | 44 px, padding 8, radius 7 |
 | Input (popup) | 30 px, radius 7, muted filled background |
-| Lists | max 7 visible rows, then scroll |
+| Lists | palette: what fits in 475 pt (about 7 rows); popup: 4–7 rows; then scroll |
 | Gaps | 6 / 8 / 10 / 12 px |
 
 ## Type
 
 | Use | Style |
 |---|---|
-| Palette search | 15 px regular |
+| Palette search | 17 px regular |
 | Section label | 11 px medium, muted |
 | Row name | 13 px medium |
 | Row source, status, hints | 11–12 px regular, muted |
