@@ -12,8 +12,9 @@ A minimal macOS menu bar app built with **Rust**, **GPUI**, and **GPUI Kit**.
 
 ## Status
 
-Planning done (including expanded unique features); Rust implementation starting. Follow
-[`docs/PI_HARNESS_GUIDE.md`](docs/PI_HARNESS_GUIDE.md) to build it task by task with Pi Harness.
+M0–M4 and most of M5 are built: the palette, favorites, calm updates, safety glances, loadouts with diff and
+launch, sharing, team versions, the digest, settings, and uninstall. What's left for a public release is a
+Developer ID-signed, notarized build and a published Homebrew cask ([DECISIONS 046](docs/DECISIONS.md)).
 
 | Doc | What's in it |
 |---|---|
@@ -48,18 +49,36 @@ app like Skills Manager or SkillDeck.
 - **U10** Shared team loadouts with versioning
 - **U11** Idle “what changed” digest
 
+## Using it
+
+- **⌃⌥L** opens the palette for the project in front (Finder or your editor). Suggested skills are pre-selected.
+  ↑↓ move · Space or Tab select · **Return** installs · **⌘↩** installs and opens your agent · ⌘Y previews a
+  skill · ⌘S saves the selection as a loadout · ⌘D diffs against the highlighted loadout · ⌘P picks the project
+  or Global · ⌘⌫ (twice) uninstalls · Esc closes.
+- **The menu bar octopus** opens the popup: paste a link, `owner/repo`, or `npx skills add …` to add a favorite;
+  see updates (the octopus gets a dot), what changed, history, loadouts, and settings (⌘,).
+- Share a loadout from its right-click menu (link or `.loadout.json`); opening one shows a preview before anything
+  changes.
+
+The first time, macOS asks to let Loadout read Finder (Automation) and editor windows (Accessibility). Without
+them Loadout falls back to the project you used last.
+
 ## Requirements
 
 - macOS 13 or newer, Apple Silicon or Intel
 - Rust (stable, via rustup) and full Xcode (GPUI compiles Metal shaders)
 - Node.js (`brew install node`) — Loadout runs `npx skills add`
 
-## Build (once T0.4 is done)
+## Build
 
 ```bash
-cargo run -p loadout            # quick run for UI work
-packaging/bundle.sh --install       # build Loadout.app, copy to /Applications, launch
-cargo test -p loadout-core          # logic tests
+cargo run -p loadout                    # quick run for UI work (no notifications or login item)
+packaging/bundle.sh --install           # build Loadout.app, copy to /Applications, launch
+packaging/bundle.sh --universal         # Apple Silicon + Intel
+cargo test -p loadout-core              # logic tests
 ```
+
+Releases: `LOADOUT_SIGN_ID="Developer ID Application: …" LOADOUT_NOTARY_PROFILE=… packaging/bundle.sh --release`
+signs, notarizes, staples, and zips, then prints the sha256 for `packaging/homebrew/loadout.rb`.
 
 Your data lives in `~/Library/Application Support/Loadout/data.json`.

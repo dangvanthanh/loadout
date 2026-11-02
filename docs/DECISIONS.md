@@ -442,3 +442,21 @@ VoiceOver reads their text.
 **Verified:** a real install then uninstall emptied the project (`skills-lock.json` → no skills), and History
 showed both. A bogus token produced GitHub's rejection message, which proves the header is sent. Saving to the
 Keychain was not exercised here, to keep test runs out of your login Keychain.
+
+## 046 — Release tooling, and what only the owner can do
+**Choice:** `packaging/bundle.sh` gains `--universal` (adds the `x86_64-apple-darwin` Rust target once, builds both
+architectures, `lipo`s them) and `--release`. The release path runs universal, then a Developer ID signature with
+hardened runtime and `entitlements.plist` (Apple events, for reading Finder), `ditto` zip, `notarytool submit
+--wait`, staple, re-zip, and `spctl` assessment, and prints the version and sha256. It refuses to start without
+`LOADOUT_SIGN_ID` and `LOADOUT_NOTARY_PROFILE`. `packaging/homebrew/loadout.rb` is the cask (Node.js caveat, zap
+of Loadout's support and cache folders, quit on uninstall) pointing at
+`github.com/dangvanthanh/loadout/releases/download/v<version>/Loadout-<version>.zip`.
+**Verified here:** a universal build (x86_64 + arm64, 58 MB) that verifies and launches on Apple Silicon. The Intel
+slice is a valid x86_64 executable but wasn't run: this Mac has no Rosetta.
+**Left for the owner (T5.5 stays unchecked):**
+- A "Developer ID Application" certificate: this Mac only has an "Apple Development" one, which Gatekeeper rejects
+  on other Macs. Then `xcrun notarytool store-credentials` and one `--release` run.
+- Uploading the zip to a GitHub release and copying the cask into a tap: publishing, so it's the owner's call.
+- Before going public: a real bundle id instead of `local.loadout.app`. Changing it later resets macOS permissions,
+  the login item, and the Keychain token, so decide once. The trademark/name check from 011 is still open too.
+- A clean-Mac install test of the cask.

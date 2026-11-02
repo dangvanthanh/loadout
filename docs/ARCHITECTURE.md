@@ -81,16 +81,14 @@ loadout/
       main.rs                     Application, gpui_kit::init, activation policy, hotkey, tray, timers
       assets.rs                   GPUI Kit assets + extra icons (icon_assets!)
       state.rs                    AppState entity: data + session + actions
-      hotkey.rs                   ⌃⌥L via global-hotkey, polled by a GPUI timer
+      hotkey.rs                   palette shortcut via global-hotkey (live re-register), polled by a timer
       tray.rs                     NSStatusItem (objc2), popup toggle, icon state
       windows.rs                  palette + popup lifecycle, positioning, close on blur
       views/
-        palette.rs                search, Into line, sections, keyboard, equip+launch
-        popup.rs                  header, paste field, list, footer, digest status
-        favorite_row.rs
-        preview.rs                preview + what changed + safety/compat findings
-        loadout_diff.rs           missing/extra skills view
-        provenance.rs             simple log view
+        palette.rs                search, Into line, sections, keyboard, equip+launch; in its list area:
+                                  skill preview (⌘Y), diff against loadout (⌘D), project chooser (⌘P)
+        popup.rs                  project switcher, paste field, favorites, update bar, footer; in its list
+                                  area: what changed, history, output, loadouts, import preview, settings
         settings.rs               shortcut, agents, digest, behavior switches (popup's Settings view)
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
@@ -102,6 +100,8 @@ loadout/
   packaging/
     Info.plist                    LSUIElement, CFBundleURLTypes (loadout), NSAppleEventsUsageDescription
     bundle.sh                     release build → Loadout.app (+ --install, --universal, --release)
+    entitlements.plist            hardened runtime (Apple events) for Developer ID builds
+    homebrew/loadout.rb           cask template; version + sha256 come from bundle.sh --release
     AppIcon.icns, icon/           app icon + make-icns.sh / make-menubar.sh (regenerate from reference art)
   reference/swift-prototype/      earlier SwiftUI version (old name SkillDock); behavior reference
   docs/

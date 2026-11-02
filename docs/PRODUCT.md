@@ -93,7 +93,8 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Idle “what changed” digest (U11)
 - ✅ Popup window parity (projects menu, Global target, settings)
 - ✅ Uninstall from a project, GitHub token in Keychain, keyboard navigation
-- ⬜ Icon, signed + notarized universal release, Homebrew cask
+- ✅ Icon, universal build, release script, Homebrew cask template
+- ⬜ Developer ID signing + notarization run, published cask (needs the owner's Apple account; DECISIONS 046)
 
 ## Screens
 

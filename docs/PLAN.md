@@ -184,6 +184,8 @@ Uninstall from a project, Keychain token, full keyboard coverage, accessibility 
 
 ### [ ] T5.5 Release
 Icon, signed + notarized universal binary, Homebrew cask formula, final docs pass.
+Done 2026-11-01: icon, `bundle.sh --universal`, scripted `--release` (sign, notarize, staple, zip, sha256),
+`packaging/homebrew/loadout.rb`, docs pass. Left: a Developer ID run and publishing (DECISIONS 046).
 **Accept:** downloadable `.app` / cask installs cleanly on a fresh Mac.
 
 ---
