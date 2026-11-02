@@ -472,3 +472,24 @@ the diff and history views room.
 **Why:** At 520 pt the palette cut off sources and crowded previews and diffs; the owner asked for widths like
 Tinycast's.
 **Verified:** the window server reported the palette at 750 × 476 (a 1 pt border rounding) and the popup at 400 wide.
+
+## 048 — Tinycast's look, and Esc that goes back
+**Choice:** Both windows are frosted glass (`WindowBackgroundAppearance::Blurred` under a 78% theme tint). The
+palette drops its divider lines and footer hints for Tinycast's layout: a 56 pt search row (20 pt text) with the
+target as a pill on its right ("📁 shop-dashboard ⌄", tooltip says where it came from, click or ⌘P), soft rows
+(10 pt radius, faint foreground wash) led by a 26 pt tile, and a bottom bar with status or the safety notice on
+the left and a capsule on the right: the main action with its keycap ("Install 1 skill ↩", "Apply Web app ↩",
+"Install anyway ↩", "Choose ↩"), then "Actions ⌘K". ⌘K opens a 320 pt menu above it listing everything for the
+highlighted row with keycaps (install, install and open the agent, select, preview or diff, uninstall, save as
+loadout, choose project); ↑↓ and Return work in it. A skill's tile is its source owner's initial on a theme chart
+color picked by owner (so one author's skills match), a loadout's is layers, and a selected row's tile fills with
+the primary color and a check. The diff and project chooser use the same rows. The popup gets the same tiles,
+rounded rows, a pill paste field, a folder chip with a caret, and its notices move into the footer (no empty
+line under the paste field). The Into line is gone; its information lives in the chip.
+**Fixed:** GPUI runs key bindings before key listeners, so the `escape → Dismiss` bindings closed the palette even
+from a preview, diff, chooser, loadout name, or the ⌘K menu, and closed the popup while renaming. Esc is now
+handled last in each window's key handler: palette = clear the search, else go back, else close (Tinycast's
+order); popup = cancel the edit or import, else go back, else close.
+**Verified:** palette list, ⌘K menu, diff, chooser, and popup were rendered to images in light and dark through
+GPUI's Metal `render_to_image` in a throwaway build (test-support features enabled, close-on-blur off; not
+committed). The glass itself only shows on screen.

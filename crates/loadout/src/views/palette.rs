@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use gpui_kit::assets::IconName as ExtraIcon;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
@@ -10,9 +11,7 @@ use gpui_kit::*;
 use loadout_core::model::Uuid;
 use loadout_core::tags;
 
-use crate::state::{AppState, Scan, Target};
-
-actions!(palette, [Dismiss]);
+use crate::state::{AppState, Scan};
 
 const CONTEXT: &str = "Palette";
 /// Tinycast's palette size (DECISIONS 047): fixed, so the window never jumps as rows change.
@@ -21,18 +20,19 @@ pub const HEIGHT: Pixels = px(475.);
 /// Where the palette's top edge sits, as a fraction of the screen's visible height.
 pub const TOP_FRACTION: f32 = 0.18;
 const SEARCH_HEIGHT: Pixels = px(56.);
-const INTO_HEIGHT: Pixels = px(32.);
-const FOOTER_HEIGHT: Pixels = px(40.);
+const BAR_HEIGHT: Pixels = px(52.);
 const ROW_HEIGHT: Pixels = px(40.);
-const LABEL_HEIGHT: Pixels = px(26.);
+const LABEL_HEIGHT: Pixels = px(28.);
 const LIST_PADDING: Pixels = px(8.);
-const NOTICE_HEIGHT: Pixels = px(32.);
+/// Row glyph slot, like Tinycast's result icons.
+const TILE: Pixels = px(26.);
+const ACTIONS_WIDTH: Pixels = px(320.);
 /// Room for a skill's source on the right of a row.
 const SOURCE_WIDTH: Pixels = px(340.);
 
-pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
-}
+// No key bindings: GPUI runs bindings before key listeners, so an Esc binding would close the
+// palette before the handler below could go back from a preview, diff, or menu first.
+pub fn init(_: &mut App) {}
 
 struct Row {
     /// A favorite's or a loadout's id.
@@ -99,6 +99,8 @@ pub struct Palette {
     diff_selected: HashSet<Uuid>,
     /// Index into the diff's missing skills.
     diff_highlight: usize,
+    /// The ⌘K actions menu is open; index of its highlighted item.
+    actions: Option<usize>,
     /// The first ⌘⌫ on an installed row; a second one removes it.
     confirm_uninstall: Option<Uuid>,
     /// The project chooser (⌘P) shows in the list area; index into `target_choices`.
@@ -166,6 +168,7 @@ impl Palette {
             diff_highlight: 0,
             choosing: None,
             confirm_uninstall: None,
+            actions: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -494,6 +497,38 @@ impl Palette {
             }
             return;
         }
+        if modifiers.platform && key == "k" {
+            self.actions = match self.actions {
+                Some(_) => None,
+                None => Some(0),
+            };
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
+        if let Some(ix) = self.actions {
+            let count = self.action_items(cx).len();
+            match key {
+                "escape" => self.actions = None,
+                "up" => self.actions = Some(ix.saturating_sub(1)),
+                "down" => self.actions = Some((ix + 1).min(count.saturating_sub(1))),
+                "enter" => {
+                    if let Some(kind) = self.action_items(cx).get(ix).map(|item| item.kind) {
+                        self.actions = None;
+                        self.run_action(kind, window, cx);
+                    }
+                }
+                // Any other key closes the menu and does its usual job.
+                _ => {
+                    self.actions = None;
+                    cx.notify();
+                    return self.on_key_down(event, window, cx);
+                }
+            }
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
         if modifiers.platform && key == "s" {
             self.start_naming(window, cx);
             cx.stop_propagation();
@@ -593,9 +628,157 @@ impl Palette {
                 let launch = self.launch_by_default(cx);
                 self.install(launch, cx)
             }
+            // Like Tinycast: Esc clears the search first, then closes.
+            "escape" if !query_empty => {
+                self.search
+                    .update(cx, |search, cx| search.set_value("", window, cx));
+            }
+            "escape" => window.remove_window(),
             _ => return,
         }
         cx.stop_propagation();
+    }
+
+    /// What ⌘K offers for the highlighted row and the selection, in order.
+    fn action_items(&self, cx: &App) -> Vec<ActionItem> {
+        let highlighted = self
+            .visible(cx)
+            .get(self.highlight)
+            .map(|&ix| &self.rows[ix]);
+        let state = self.state.read(cx);
+        let mut items = vec![ActionItem {
+            label: self.primary_label(cx),
+            keys: "enter",
+            kind: ActionKind::Install,
+        }];
+        if let Some(agent) = state.agent_for(&self.chosen(cx)) {
+            items.push(ActionItem {
+                label: format!(
+                    "Install and open {}",
+                    loadout_core::launch::agent_name(&agent)
+                )
+                .into(),
+                keys: "cmd-enter",
+                kind: ActionKind::InstallAndOpen,
+            });
+        }
+        if let Some(row) = highlighted {
+            if row.selectable() {
+                let label = if self.selected.contains(&row.id) {
+                    "Deselect"
+                } else {
+                    "Select"
+                };
+                items.push(ActionItem {
+                    label: label.into(),
+                    keys: "space",
+                    kind: ActionKind::Toggle,
+                });
+            }
+            if row.loadout {
+                items.push(ActionItem {
+                    label: "Diff against loadout".into(),
+                    keys: "cmd-d",
+                    kind: ActionKind::Diff,
+                });
+            } else {
+                items.push(ActionItem {
+                    label: "Preview".into(),
+                    keys: "cmd-y",
+                    kind: ActionKind::Preview,
+                });
+            }
+            if row.installed && !row.loadout {
+                items.push(ActionItem {
+                    label: "Uninstall".into(),
+                    keys: "cmd-backspace",
+                    kind: ActionKind::Uninstall,
+                });
+            }
+        }
+        items.push(ActionItem {
+            label: "Save selection as loadout".into(),
+            keys: "cmd-s",
+            kind: ActionKind::SaveLoadout,
+        });
+        items.push(ActionItem {
+            label: "Choose project".into(),
+            keys: "cmd-p",
+            kind: ActionKind::ChooseProject,
+        });
+        items
+    }
+
+    fn run_action(&mut self, kind: ActionKind, window: &mut Window, cx: &mut Context<Self>) {
+        let highlighted = self
+            .visible(cx)
+            .get(self.highlight)
+            .map(|&ix| self.rows[ix].id);
+        match kind {
+            ActionKind::Install => {
+                let launch = self.launch_by_default(cx);
+                self.install(launch, cx)
+            }
+            ActionKind::InstallAndOpen => self.install(true, cx),
+            ActionKind::Toggle => self.toggle_highlighted(cx),
+            ActionKind::Preview => self.toggle_preview(highlighted, cx),
+            ActionKind::Diff => self.set_diff(highlighted, cx),
+            ActionKind::Uninstall => {
+                if let Some(id) = highlighted {
+                    self.state.update(cx, |state, cx| state.uninstall(id, cx));
+                }
+            }
+            ActionKind::SaveLoadout => self.start_naming(window, cx),
+            ActionKind::ChooseProject => {
+                self.choosing = Some(0);
+                self.preview = None;
+                self.diff = None;
+            }
+        }
+        cx.notify();
+    }
+
+    /// The capsule's main action for the current mode ("Install 2 skills", "Save loadout", …).
+    fn primary_label(&self, cx: &App) -> SharedString {
+        if self.naming {
+            return "Save loadout".into();
+        }
+        if self.choosing.is_some() {
+            return "Choose".into();
+        }
+        if self.confirm_uninstall.is_some() {
+            return "Uninstall".into();
+        }
+        if self.state.read(cx).safety_notice.is_some() {
+            return "Install anyway".into();
+        }
+        if let Some(loadout) = self.diff {
+            let missing = self.state.read(cx).loadout_diff(loadout).missing;
+            let n = missing
+                .iter()
+                .filter(|id| self.diff_selected.contains(id))
+                .count();
+            return match n {
+                0 => "Nothing selected".into(),
+                n => format!("Install {n} missing").into(),
+            };
+        }
+        let chosen = |r: &&Row| self.selected.contains(&r.id);
+        let loadouts: Vec<SharedString> = self
+            .rows
+            .iter()
+            .filter(chosen)
+            .filter(|r| r.loadout)
+            .map(|r| r.name.clone())
+            .collect();
+        let updates = self
+            .rows
+            .iter()
+            .filter(chosen)
+            .filter(|r| !r.loadout && r.installed)
+            .count();
+        let installs = self.selected.len() - updates - loadouts.len();
+        return_hint(installs, updates, &loadouts)
     }
 
     /// Return: install (or update) the selection, or the highlighted row when nothing is selected.
@@ -610,48 +793,28 @@ impl Palette {
         self.state.read(cx).data.settings.launch_after_install
     }
 
-    fn dismiss(&mut self, _: &Dismiss, window: &mut Window, _: &mut Context<Self>) {
-        window.remove_window();
-    }
-
     fn render_row(&self, ix: usize, highlighted: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let row = &self.rows[ix];
         let selected = self.selected.contains(&row.id);
         let id = row.id;
-        let hover = theme.list_hover;
         let warning = theme.warning;
+        let muted = theme.muted_foreground;
         let is_loadout = row.loadout;
         let this = cx.entity().downgrade();
-        let icon = if selected {
-            Icon::new(IconName::CircleCheck).text_color(theme.primary)
+        let glyph = if is_loadout {
+            Glyph::icon(ExtraIcon::Layers)
         } else {
-            Icon::new(ExtraIcon::Circle).text_color(theme.muted_foreground)
+            Glyph::for_source(&row.source)
         };
-        let element = div()
-            .id(("row", ix))
-            .h(ROW_HEIGHT)
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(px(6.))
-            .when(highlighted, |row| row.bg(theme.list_active))
-            .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
+        let element = list_row(("row", ix), highlighted, cx)
             .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
-            .child(icon.small())
-            .when(row.loadout, |row| {
-                row.child(
-                    Icon::new(ExtraIcon::Layers)
-                        .xsmall()
-                        .text_color(theme.muted_foreground),
-                )
-            })
+            .child(tile(selected, glyph, cx))
             .child(
                 div()
                     .id(("name", ix))
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::MEDIUM)
+                    .min_w_0()
+                    .text_size(px(14.))
                     .truncate()
                     .cursor_pointer()
                     // The name previews (a loadout's name shows its diff); the rest of the row toggles.
@@ -666,14 +829,6 @@ impl Palette {
                     .child(row.name.clone()),
             )
             .child(div().flex_1())
-            .child(
-                div()
-                    .max_w(SOURCE_WIDTH)
-                    .truncate()
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .child(row.source.clone()),
-            )
             .when_some(row.findings.clone(), |row, findings| {
                 row.child(
                     div()
@@ -688,12 +843,16 @@ impl Palette {
             })
             .when(row.update, |row| row.child(update_pill(cx)))
             .when(row.installed && !row.update, |row| {
-                row.child(
-                    Icon::new(IconName::Check)
-                        .small()
-                        .text_color(theme.muted_foreground),
-                )
-            });
+                row.child(Icon::new(IconName::Check).small().text_color(muted))
+            })
+            .child(
+                div()
+                    .max_w(SOURCE_WIDTH)
+                    .truncate()
+                    .text_size(px(13.))
+                    .text_color(muted)
+                    .child(row.source.clone()),
+            );
         if !is_loadout {
             if !row.installed {
                 return element.into_any_element();
@@ -721,6 +880,103 @@ impl Palette {
             })
             .into_any_element()
     }
+
+    /// The bottom-right capsule: the main action with ↩, then Actions with ⌘K.
+    fn render_capsule(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let fill = theme.foreground.opacity(0.06);
+        let hover = theme.foreground.opacity(0.08);
+        let label = self.primary_label(cx);
+        let main_keys = if self.confirm_uninstall.is_some() {
+            "cmd-backspace"
+        } else {
+            "enter"
+        };
+        let part = |id: &'static str| {
+            div()
+                .id(id)
+                .h(px(30.))
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_full()
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+        };
+        div()
+            .h(px(36.))
+            .px_1()
+            .flex()
+            .items_center()
+            .gap_1()
+            .rounded_full()
+            .bg(fill)
+            .border_1()
+            .border_color(theme.border.opacity(0.6))
+            .child(
+                part("primary")
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.run_action(ActionKind::Install, window, cx)
+                    }))
+                    .child(label)
+                    .children(keycap(main_keys)),
+            )
+            .child(div().w(px(1.)).h(px(16.)).bg(theme.border))
+            .child(
+                part("actions")
+                    .text_color(theme.muted_foreground)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.actions = Some(0);
+                        cx.notify();
+                    }))
+                    .child("Actions")
+                    .children(keycap("cmd-k")),
+            )
+            .into_any_element()
+    }
+
+    /// The ⌘K menu, floating above the capsule.
+    fn render_actions(&self, highlight: usize, cx: &mut Context<Self>) -> AnyElement {
+        let items = self.action_items(cx);
+        let theme = cx.theme();
+        let hover = theme.foreground.opacity(0.05);
+        let active = theme.foreground.opacity(0.09);
+        div()
+            .absolute()
+            .right(px(10.))
+            .bottom(BAR_HEIGHT)
+            .w(ACTIONS_WIDTH)
+            .p_1()
+            .flex()
+            .flex_col()
+            .rounded(px(12.))
+            .bg(theme.popover)
+            .border_1()
+            .border_color(theme.border)
+            .shadow_lg()
+            .children(items.into_iter().enumerate().map(|(ix, item)| {
+                div()
+                    .id(("action", ix))
+                    .h(px(32.))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded(px(8.))
+                    .text_size(px(13.))
+                    .when(ix == highlight, |row| row.bg(active))
+                    .when(ix != highlight, |row| row.hover(move |s| s.bg(hover)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.actions = None;
+                        this.run_action(item.kind, window, cx);
+                    }))
+                    .child(item.label)
+                    .child(div().flex_1())
+                    .children(keycap(item.keys))
+            }))
+            .into_any_element()
+    }
 }
 
 impl Palette {
@@ -730,30 +986,17 @@ impl Palette {
         let global = state.data.settings.global;
         let current = state.target.root.clone();
         let choices = self.target_choices(cx);
-        let theme = cx.theme();
-        let mut items = vec![
-            div()
-                .h(LABEL_HEIGHT)
-                .px_2()
-                .flex()
-                .items_center()
-                .text_size(px(11.))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.muted_foreground)
-                .child("Install into")
-                .into_any_element(),
-        ];
+        let mut items = vec![list_label("Install into".into(), cx)];
         for (ix, choice) in choices.into_iter().enumerate() {
-            let theme = cx.theme();
-            let hover = theme.list_hover;
             let is_current = match &choice {
                 None => global,
                 Some(path) => !global && current.as_ref() == Some(path),
             };
-            let (name, detail) = match &choice {
+            let (name, detail, icon): (String, String, Icon) = match &choice {
                 None => (
-                    "Global".to_string(),
-                    "home folder, every project".to_string(),
+                    "Global".into(),
+                    "home folder, every project".into(),
+                    Icon::new(IconName::Globe),
                 ),
                 Some(path) => (
                     path.file_name().map_or_else(
@@ -761,49 +1004,22 @@ impl Palette {
                         |n| n.to_string_lossy().into_owned(),
                     ),
                     path.display().to_string(),
+                    Icon::new(IconName::Folder),
                 ),
             };
+            let muted = cx.theme().muted_foreground;
             items.push(
-                div()
-                    .id(("choice", ix))
-                    .h(ROW_HEIGHT)
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded(px(6.))
-                    .when(ix == highlight, |row| row.bg(theme.list_active))
-                    .when(ix != highlight, |row| row.hover(move |s| s.bg(hover)))
+                list_row(("choice", ix), ix == highlight, cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose_key(ix, "enter", cx);
                     }))
-                    .child(
-                        Icon::new(IconName::Folder)
-                            .small()
-                            .text_color(theme.muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(13.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(name),
-                    )
+                    .child(tile(false, Glyph::icon(icon), cx))
+                    .child(row_name(name))
                     .child(div().flex_1())
-                    .child(
-                        div()
-                            .max_w(SOURCE_WIDTH)
-                            .truncate()
-                            .text_size(px(11.))
-                            .text_color(theme.muted_foreground)
-                            .child(detail),
-                    )
                     .when(is_current, |row| {
-                        row.child(
-                            Icon::new(IconName::Check)
-                                .small()
-                                .text_color(theme.muted_foreground),
-                        )
+                        row.child(Icon::new(IconName::Check).small().text_color(muted))
                     })
+                    .child(row_detail(detail, muted))
                     .into_any_element(),
             );
         }
@@ -829,111 +1045,70 @@ impl Palette {
         let missing: Vec<(Uuid, (String, String))> =
             diff.missing.iter().map(|id| (*id, favorite(id))).collect();
         let present: Vec<(String, String)> = diff.present.iter().map(favorite).collect();
-        let theme = cx.theme();
-        let muted = theme.muted_foreground;
-        let label = |text: String| {
-            div()
-                .h(LABEL_HEIGHT)
-                .px_2()
-                .flex()
-                .items_center()
-                .text_size(px(11.))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(muted)
-                .child(text)
-                .into_any_element()
-        };
-        let line = |name: String, trailing: String, icon: Option<Icon>| {
-            div()
-                .h(px(28.))
-                .px_2()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_color(muted)
-                .children(icon)
-                .child(div().text_size(px(13.)).truncate().child(name))
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .max_w(SOURCE_WIDTH)
-                        .truncate()
-                        .text_size(px(11.))
-                        .child(trailing),
-                )
-                .into_any_element()
-        };
-        let mut items = Vec::new();
-        if missing.is_empty() {
-            items.push(label(format!(
-                "Nothing missing: this project has everything in {name}"
-            )));
-        } else {
-            items.push(label(format!("Missing vs {name} ({})", missing.len())));
-        }
+        let extra = diff.extra;
+        let mut items = vec![list_label(
+            if missing.is_empty() {
+                format!("Nothing missing: this project has everything in {name}").into()
+            } else {
+                format!("Missing vs {name} ({})", missing.len()).into()
+            },
+            cx,
+        )];
         for (ix, (id, (skill, source))) in missing.into_iter().enumerate() {
             let selected = self.diff_selected.contains(&id);
-            let highlighted = ix == self.diff_highlight;
-            let theme = cx.theme();
-            let hover = theme.list_hover;
-            let icon = if selected {
-                Icon::new(IconName::CircleCheck).text_color(theme.primary)
-            } else {
-                Icon::new(ExtraIcon::Circle).text_color(theme.muted_foreground)
-            };
+            let muted = cx.theme().muted_foreground;
             items.push(
-                div()
-                    .id(("missing", ix))
-                    .h(ROW_HEIGHT)
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded(px(6.))
-                    .when(highlighted, |row| row.bg(theme.list_active))
-                    .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
+                list_row(("missing", ix), ix == self.diff_highlight, cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !this.diff_selected.remove(&id) {
                             this.diff_selected.insert(id);
                         }
                         cx.notify();
                     }))
-                    .child(icon.small())
-                    .child(
-                        div()
-                            .text_size(px(13.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .truncate()
-                            .child(skill),
-                    )
+                    .child(tile(selected, Glyph::for_source(&source), cx))
+                    .child(row_name(skill))
                     .child(div().flex_1())
-                    .child(
-                        div()
-                            .max_w(SOURCE_WIDTH)
-                            .truncate()
-                            .text_size(px(11.))
-                            .text_color(theme.muted_foreground)
-                            .child(source),
-                    )
+                    .child(row_detail(source, muted))
                     .into_any_element(),
             );
         }
+        // Installed and extra skills are context, not choices: dimmed, no highlight.
+        let quiet =
+            |ix: usize, id: &'static str, skill: String, detail: String, glyph: Glyph, cx: &App| {
+                let muted = cx.theme().muted_foreground;
+                div()
+                    .id((id, ix))
+                    .h(ROW_HEIGHT)
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .opacity(0.6)
+                    .child(tile(false, glyph, cx))
+                    .child(row_name(skill))
+                    .child(div().flex_1())
+                    .child(row_detail(detail, muted))
+                    .into_any_element()
+            };
         if !present.is_empty() {
-            items.push(label(format!("Installed ({})", present.len())));
-            items.extend(present.into_iter().map(|(skill, source)| {
-                line(skill, source, Some(Icon::new(IconName::Check).small()))
-            }));
+            items.push(list_label(
+                format!("Installed ({})", present.len()).into(),
+                cx,
+            ));
+            for (ix, (skill, source)) in present.into_iter().enumerate() {
+                let glyph = Glyph::for_source(&source);
+                items.push(quiet(ix, "present", skill, source, glyph, cx));
+            }
         }
-        if !diff.extra.is_empty() {
-            items.push(label(format!(
-                "Extra, not in {name} ({})",
-                diff.extra.len()
-            )));
-            items.extend(
-                diff.extra
-                    .into_iter()
-                    .map(|skill| line(skill, String::new(), None)),
-            );
+        if !extra.is_empty() {
+            items.push(list_label(
+                format!("Extra, not in {name} ({})", extra.len()).into(),
+                cx,
+            ));
+            for (ix, skill) in extra.into_iter().enumerate() {
+                let glyph = Glyph::icon(IconName::BookOpen);
+                items.push(quiet(ix, "extra", skill, String::new(), glyph, cx));
+            }
         }
         items
     }
@@ -1039,40 +1214,18 @@ impl Render for Palette {
                 })
                 .collect(),
         };
-        let status = self.state.read(cx).install_status.clone();
-        let notice = self
-            .state
-            .read(cx)
+        let capsule = self.render_capsule(cx);
+        let actions = self.actions.map(|ix| self.render_actions(ix, cx));
+        let (target_name, target_tip) = target_text(self.state.read(cx));
+        let chip = target_chip(target_name, target_tip, cx);
+        let state = self.state.read(cx);
+        let detection_notice = state.target.notice.clone();
+        let safety = state
             .safety_notice
             .as_ref()
             .map(|n| (n.favorite, n.text.clone()));
-        let theme = cx.theme();
-        let chosen = |r: &&Row| self.selected.contains(&r.id);
-        let loadouts: Vec<SharedString> = self
-            .rows
-            .iter()
-            .filter(chosen)
-            .filter(|r| r.loadout)
-            .map(|r| r.name.clone())
-            .collect();
-        let updates = self
-            .rows
-            .iter()
-            .filter(chosen)
-            .filter(|r| !r.loadout && r.installed)
-            .count();
-        let installs = self.selected.len() - updates - loadouts.len();
-        let diff_count = self.diff.map(|loadout| {
-            let missing = self.state.read(cx).loadout_diff(loadout).missing;
-            missing
-                .iter()
-                .filter(|id| self.diff_selected.contains(id))
-                .count()
-        });
-        let loadout_highlighted = self.highlighted_loadout(cx).is_some();
         let confirm: Option<SharedString> = self.confirm_uninstall.and_then(|id| {
             let name = self.rows.iter().find(|r| r.id == id)?.name.clone();
-            let state = self.state.read(cx);
             let place = if state.data.settings.global {
                 "Global".to_string()
             } else {
@@ -1084,69 +1237,77 @@ impl Render for Palette {
                     .to_string_lossy()
                     .into_owned()
             };
-            Some(format!("⌘⌫ again removes {name} from {place}").into())
+            Some(format!("Press ⌘⌫ again to remove {name} from {place}").into())
         });
-        // "· ⌘↩ + open Pi", or "+ open Pi" when Return opens it anyway.
-        let launch_hint = {
-            let state = self.state.read(cx);
-            state.agent_for(&self.chosen(cx)).map(|agent| {
-                let name = loadout_core::launch::agent_name(&agent).to_string();
-                if state.data.settings.launch_after_install {
-                    format!(" + open {name}")
-                } else {
-                    format!(" · ⌘↩ + open {name}")
-                }
-            })
-        };
-        let with_launch = |hint: SharedString| -> SharedString {
-            match &launch_hint {
-                Some(launch) => format!("{hint}{launch}").into(),
-                None => hint,
-            }
-        };
+        let status: Option<SharedString> = confirm
+            .or_else(|| state.install_status.clone())
+            .or_else(
+                || match (self.naming, self.choosing, self.diff, self.preview) {
+                    (true, ..) => Some("Name the loadout; esc cancels".into()),
+                    (_, Some(_), ..) => Some("Where should skills go?".into()),
+                    (_, _, Some(_), _) | (_, _, _, Some(_)) => Some("esc goes back".into()),
+                    _ => None,
+                },
+            );
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
         let empty = self.rows.is_empty();
+        let list_mode = self.preview.is_none() && self.diff.is_none() && self.choosing.is_none();
+        let search_icon = if self.naming {
+            ExtraIcon::Layers.into()
+        } else {
+            Icon::new(IconName::Search)
+        };
+        let field = if self.naming {
+            &self.name
+        } else {
+            &self.search
+        };
 
         div()
             .key_context(CONTEXT)
-            .on_action(cx.listener(Self::dismiss))
             .capture_key_down(cx.listener(Self::on_key_down))
+            .relative()
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.background)
+            // Glass: the window blurs what's behind it; this tint keeps text readable.
+            .bg(theme.background.opacity(0.78))
             .text_color(theme.foreground)
             .child(
                 div()
                     .h(SEARCH_HEIGHT)
-                    .px_3()
+                    .flex_none()
+                    .pl_4()
+                    .pr_3()
                     .flex()
                     .items_center()
-                    .when(!self.naming, |bar| {
-                        bar.child(
-                            Input::new(&self.search)
+                    .gap_3()
+                    .child(search_icon.size(px(18.)).text_color(muted))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(field)
                                 .appearance(false)
                                 .large()
-                                .text_size(px(17.))
-                                .prefix(Icon::new(IconName::Search).text_color(theme.muted_foreground)),
-                        )
-                    })
-                    .when(self.naming, |bar| {
-                        bar.child(
-                            Input::new(&self.name)
-                                .appearance(false)
-                                .large()
-                                .text_size(px(17.))
-                                .prefix(Icon::new(ExtraIcon::Layers).text_color(theme.muted_foreground)),
-                        )
-                    }),
+                                .text_size(px(20.)),
+                        ),
+                    )
+                    .when(!self.naming, |bar| bar.child(chip)),
             )
-            .child(into_line(
-                &self.state.read(cx).target,
-                self.state.read(cx).data.settings.global,
-                &stack_label,
-                cx,
-            ))
-            .child(div().h(px(1.)).bg(theme.border))
+            .when_some(detection_notice, |palette, notice| {
+                palette.child(
+                    div()
+                        .px_4()
+                        .pb_1()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(px(12.))
+                        .text_color(theme.warning)
+                        .child(Icon::new(ExtraIcon::ShieldAlert).xsmall())
+                        .child(div().truncate().child(notice)),
+                )
+            })
             .child(
                 div()
                     .id("favorites")
@@ -1154,83 +1315,179 @@ impl Render for Palette {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .p(LIST_PADDING)
-                    .when(empty && self.preview.is_none() && self.diff.is_none(), |list| {
-                        list.flex().items_center().px_3().text_size(px(12.)).text_color(theme.muted_foreground).child(
+                    .px(LIST_PADDING)
+                    .when(empty && list_mode, |list| {
+                        list.flex().items_center().justify_center().text_size(px(13.)).text_color(muted).child(
                             "No favorites yet. Paste a link or owner/repo in the menu bar popup.",
                         )
                     })
-                    .when(!empty && visible.is_empty() && self.preview.is_none() && self.diff.is_none(), |list| {
-                        list.px_3().text_size(px(12.)).text_color(theme.muted_foreground).child("No matches")
+                    .when(!empty && visible.is_empty() && list_mode, |list| {
+                        list.flex().items_center().justify_center().text_size(px(13.)).text_color(muted).child("No matches")
                     })
                     .children(rows),
             )
-            .when_some(notice.clone(), |palette, (favorite, text)| {
-                palette.child(
-                    div()
-                        .h(NOTICE_HEIGHT)
-                        .px_3()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .text_size(px(12.))
-                        .text_color(theme.warning)
-                        .child(Icon::new(ExtraIcon::ShieldAlert).small())
-                        .child(div().flex_1().min_w_0().truncate().child(text))
-                        .child(
-                            div()
-                                .id("review")
-                                .cursor_pointer()
-                                .text_color(theme.foreground)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.preview = None;
-                                    this.toggle_preview(Some(favorite), cx)
-                                }))
-                                .child("Review"),
-                        ),
-                )
-            })
-            .child(div().h(px(1.)).bg(theme.border))
             .child(
                 div()
-                    .h(FOOTER_HEIGHT)
-                    .px_3()
+                    .h(BAR_HEIGHT)
+                    .flex_none()
+                    .pl_4()
+                    .pr(px(8.))
                     .flex()
                     .items_center()
                     .gap_3()
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .child(match (self.naming, status, notice.is_some(), diff_count) {
-                        _ if confirm.is_some() => confirm.clone().unwrap_or_default(),
-                        (true, ..) => "↩ Save as loadout".into(),
-                        (false, Some(status), ..) => status,
-                        (false, None, true, _) => "↩ Install anyway".into(),
-                        (false, None, false, Some(0)) => "Nothing selected".into(),
-                        (false, None, false, Some(n)) => {
-                            with_launch(format!("↩ Install {n} missing").into())
-                        }
-                        (false, None, false, None) => {
-                            with_launch(return_hint(installs, updates, &loadouts))
-                        }
+                    .child(match safety {
+                        Some((favorite, text)) => div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(px(12.))
+                            .text_color(theme.warning)
+                            .child(Icon::new(ExtraIcon::ShieldAlert).small())
+                            .child(div().min_w_0().truncate().child(text))
+                            .child(
+                                div()
+                                    .id("review")
+                                    .flex_none()
+                                    .cursor_pointer()
+                                    .text_color(theme.foreground)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.preview = None;
+                                        this.toggle_preview(Some(favorite), cx)
+                                    }))
+                                    .child("Review"),
+                            ),
+                        None => div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(12.))
+                            .text_color(muted)
+                            .children(status),
                     })
-                    .child(div().flex_1())
-                    .child(if self.naming {
-                        "esc cancel"
-                    } else if self.choosing.is_some() {
-                        "↑↓ move · ↩ pick · esc back"
-                    } else if self.diff.is_some() {
-                        "↑↓ move · space select · esc back"
-                    } else if self.preview.is_some() {
-                        "⌘Y or esc closes preview"
-                    } else if loadout_highlighted {
-                        "↑↓ move · space select · ⌘D diff · esc close"
-                    } else {
-                        "↑↓ move · space select · ⌘S save · ⌘P project · esc close"
-                    }),
+                    .child(capsule),
             )
+            .children(actions)
     }
+}
+
+/// A row in the list area: full width, rounded, a soft highlight like Tinycast's.
+fn list_row(id: impl Into<ElementId>, highlighted: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.foreground.opacity(0.05);
+    div()
+        .id(id)
+        .h(ROW_HEIGHT)
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .gap_3()
+        .rounded(px(10.))
+        .when(highlighted, |row| row.bg(theme.foreground.opacity(0.09)))
+        .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
+}
+
+/// What a row's 26 pt tile shows when it isn't selected.
+pub enum Glyph {
+    /// The source owner's initial, tinted per owner (skills).
+    Monogram(String),
+    Icon(Box<Icon>),
+}
+
+impl Glyph {
+    pub fn icon(icon: impl Into<Icon>) -> Self {
+        Glyph::Icon(Box::new(icon.into()))
+    }
+
+    /// "anthropics/skills" → A, "https://github.com/acme/kit" → A, "https://docs.x.dev" → D.
+    pub fn for_source(source: &str) -> Self {
+        let source = source.trim();
+        let rest = source
+            .strip_prefix("https://")
+            .or_else(|| source.strip_prefix("http://"))
+            .unwrap_or(source);
+        let rest = rest
+            .strip_prefix("github.com/")
+            .or_else(|| rest.strip_prefix("www.github.com/"))
+            .or_else(|| rest.strip_prefix("gitlab.com/"))
+            .unwrap_or(rest);
+        let rest = rest.strip_prefix("git@github.com:").unwrap_or(rest);
+        let owner = rest.split(['/', '.']).next().unwrap_or(rest);
+        Glyph::Monogram(owner.to_string())
+    }
+}
+
+/// The 26 pt tile: the item's glyph, or a filled check when selected.
+pub fn tile(selected: bool, glyph: Glyph, cx: &App) -> Div {
+    let theme = cx.theme();
+    let base = div()
+        .size(TILE)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(7.));
+    if selected {
+        return base.bg(theme.primary).child(
+            Icon::new(IconName::Check)
+                .small()
+                .text_color(theme.primary_foreground),
+        );
+    }
+    match glyph {
+        Glyph::Icon(icon) => base
+            .bg(theme.foreground.opacity(0.07))
+            .child(icon.small().text_color(theme.muted_foreground)),
+        Glyph::Monogram(owner) => {
+            // Theme chart colors, picked by owner, so one author's skills share a color.
+            let colors = [
+                theme.chart_1,
+                theme.chart_2,
+                theme.chart_3,
+                theme.chart_4,
+                theme.chart_5,
+            ];
+            let hash = owner.bytes().fold(0usize, |h, b| {
+                h.wrapping_mul(31)
+                    .wrapping_add(b.to_ascii_lowercase() as usize)
+            });
+            let color = colors[hash % colors.len()];
+            let letter: String = owner
+                .chars()
+                .next()
+                .map_or_else(String::new, |c| c.to_uppercase().collect());
+            base.bg(color.opacity(0.18))
+                .text_color(color)
+                .text_size(px(12.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(letter)
+        }
+    }
+}
+
+/// A keycap for a shortcut like "cmd-k"; `None` if it doesn't parse.
+fn keycap(keys: &'static str) -> Option<Kbd> {
+    Keystroke::parse(keys).ok().map(Kbd::new)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ActionKind {
+    Install,
+    InstallAndOpen,
+    Toggle,
+    Preview,
+    Diff,
+    Uninstall,
+    SaveLoadout,
+    ChooseProject,
+}
+
+#[derive(Clone)]
+struct ActionItem {
+    label: SharedString,
+    keys: &'static str,
+    kind: ActionKind,
 }
 
 fn capitalize(text: &str) -> String {
@@ -1255,18 +1512,14 @@ pub fn update_pill(cx: &App) -> Div {
         .child("Update")
 }
 
-/// The footer's Return hint for what's selected.
+/// The main action's words for what's selected.
 fn return_hint(installs: usize, updates: usize, loadouts: &[SharedString]) -> SharedString {
     let skills_hint = skills_hint(installs, updates);
     match loadouts {
         [] => skills_hint,
-        [one] if installs + updates == 0 => format!("↩ Apply {one}").into(),
-        [one] => format!(
-            "↩ Apply {one} + {}",
-            skills_hint.trim_start_matches("↩ ").to_lowercase()
-        )
-        .into(),
-        many => format!("↩ Apply {} loadouts", many.len()).into(),
+        [one] if installs + updates == 0 => format!("Apply {one}").into(),
+        [one] => format!("Apply {one} + {}", skills_hint.to_lowercase()).into(),
+        many => format!("Apply {} loadouts", many.len()).into(),
     }
 }
 
@@ -1279,80 +1532,127 @@ fn skills_hint(installs: usize, updates: usize) -> SharedString {
         }
     };
     match (installs, updates) {
-        (0, 0) => "↩ Install highlighted".into(),
-        (n, 0) => format!("↩ Install {}", skills(n)).into(),
-        (0, n) => format!("↩ Update {}", skills(n)).into(),
-        (a, b) => format!("↩ Install {a}, update {b}").into(),
+        (0, 0) => "Install".into(),
+        (n, 0) => format!("Install {}", skills(n)).into(),
+        (0, n) => format!("Update {}", skills(n)).into(),
+        (a, b) => format!("Install {a}, update {b}").into(),
     }
 }
 
 fn section_label(section: Section, stack_label: &str, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let suggested = section == Section::Suggested;
     let text: SharedString = match (section, stack_label.is_empty()) {
         (Section::Suggested, false) => format!("Suggested for {stack_label}").into(),
         (Section::Suggested, true) => "Suggested".into(),
         (Section::Loadouts, _) => "Loadouts".into(),
         (Section::Other, _) => "Other favorites".into(),
     };
+    list_label(text, cx)
+}
+
+/// A section label in the list area ("Suggested for Next.js", "Install into").
+fn list_label(text: SharedString, cx: &App) -> AnyElement {
     div()
         .h(LABEL_HEIGHT)
-        .px_2()
+        .px(px(10.))
+        .pt_1()
         .flex()
         .items_center()
-        .gap_1()
-        .text_size(px(11.))
+        .text_size(px(12.))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(theme.muted_foreground)
-        .when(suggested, |label| {
-            label.child(Icon::new(ExtraIcon::Sparkles).xsmall())
-        })
+        .text_color(cx.theme().muted_foreground)
         .child(text)
         .into_any_element()
 }
 
-/// "Into: shop-dashboard · Next.js, Tailwind        from Zed" — where Return will install.
-fn into_line(target: &Target, global: bool, stack_label: &str, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
-    let name = if global {
-        Some("Global".to_string())
+/// A row's title: 14 pt, truncated.
+fn row_name(text: impl Into<SharedString>) -> Div {
+    div()
+        .min_w_0()
+        .text_size(px(14.))
+        .truncate()
+        .child(text.into())
+}
+
+/// A row's right-hand detail: 13 pt muted, truncated.
+fn row_detail(text: impl Into<SharedString>, muted: Hsla) -> Div {
+    div()
+        .max_w(SOURCE_WIDTH)
+        .truncate()
+        .text_size(px(13.))
+        .text_color(muted)
+        .child(text.into())
+}
+
+/// The chip's name and tooltip: where Return installs, and where that came from.
+fn target_text(state: &AppState) -> (SharedString, SharedString) {
+    let target = &state.target;
+    let global = state.data.settings.global;
+    let name: SharedString = if global {
+        "Global".into()
     } else {
         target
             .root
             .as_ref()
             .and_then(|root| root.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
+            .map_or_else(
+                || "No project".into(),
+                |n| n.to_string_lossy().into_owned().into(),
+            )
     };
-    let stack_label = if global { "" } else { stack_label };
-    let trailing: Option<SharedString> = if global {
-        Some("home folder · ⌘P to change".into())
+    let origin = if global {
+        "Installs to your home folder".to_string()
     } else if target.chosen {
-        Some("chosen · ⌘P to change".into())
+        "Chosen".to_string()
     } else if target.detecting {
-        None
-    } else if let Some(notice) = &target.notice {
-        Some(notice.clone())
+        "Finding the project…".to_string()
     } else if let Some(app) = &target.from_app {
-        Some(format!("from {app}").into())
+        format!("From {app}")
     } else {
-        name.as_ref().map(|_| "last used".into())
+        "Last used".to_string()
     };
+    let stack = state.stack_summary();
+    let tip: SharedString = if stack.is_empty() || global {
+        format!("{origin} · ⌘P to change").into()
+    } else {
+        format!("{origin} · {stack} · ⌘P to change").into()
+    };
+    (name, tip)
+}
+
+/// Where Return installs, as a chip on the search row: "📁 shop-dashboard ⌄"; ⌘P or a click
+/// changes it.
+fn target_chip(name: SharedString, tip: SharedString, cx: &mut Context<Palette>) -> AnyElement {
+    let theme = cx.theme();
+    let hover = theme.foreground.opacity(0.08);
     div()
-        .h(INTO_HEIGHT)
+        .id("target")
+        .h(px(28.))
         .px_3()
         .flex()
+        .flex_none()
         .items_center()
         .gap_2()
+        .rounded_full()
+        .bg(theme.foreground.opacity(0.05))
+        .hover(move |s| s.bg(hover))
+        .cursor_pointer()
         .text_size(px(12.))
         .text_color(theme.muted_foreground)
-        .child("Into:")
-        .child(match name {
-            Some(name) => div().text_color(theme.foreground).child(name),
-            None => div().child("no project yet"),
-        })
-        .when(!stack_label.is_empty(), |line| {
-            line.child(format!("· {stack_label}"))
-        })
-        .child(div().flex_1())
-        .children(trailing.map(|text| div().min_w_0().truncate().child(text)))
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.choosing = Some(0);
+            this.preview = None;
+            this.diff = None;
+            cx.notify();
+        }))
+        .child(Icon::new(IconName::Folder).xsmall())
+        .child(
+            div()
+                .max_w(px(180.))
+                .truncate()
+                .text_color(theme.foreground)
+                .child(name),
+        )
+        .child(Icon::new(IconName::ChevronDown).xsmall())
+        .into_any_element()
 }

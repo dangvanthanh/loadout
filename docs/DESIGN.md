@@ -18,19 +18,24 @@ When in doubt, remove it.
    nothing fits, kept in `views/`.
 7. **Feel like macOS:** system font, 13 px body, hairline borders, small radius (7 px; 12 px for the palette window),
    no heavy shadows except the palette's window shadow.
+8. **Look like Tinycast.** Both windows are frosted glass (blurred window background under a 78% theme tint).
+   Rows are soft: a 10 px radius and a faint foreground wash for hover and highlight, no list-active color.
+   Every row leads with a 26 px tile; the main action lives in a bottom-right capsule with its keycap, next
+   to "Actions ⌘K", which lists everything else for the highlighted row.
 
 ## Layout
 
 | Token | Value |
 |---|---|
 | Palette | 750 × 475 pt, fixed (Tinycast's size), centered on the active screen, top edge 18% down; shrinks to fit small screens |
-| Palette search | 56 px tall, 17 px text, no border, leading search icon |
-| Palette "Into" line | 32 px, 12 px muted text, target name in foreground |
-| Palette row | 40 px, radius 6, highlighted row uses list-active color; source column up to 340 px |
-| Palette footer | 40 px, 11 px muted key hints |
+| Palette search | 56 px tall, 20 px text, 18 px search glyph, no border; the target chip sits on its right |
+| Palette target chip | 28 px pill: folder icon, project (or Global), chevron; tooltip says where it came from; ⌘P |
+| Palette row | 40 px, radius 10, 26 px tile, 14 px name, 13 px muted source (up to 340 px) on the right |
+| Palette bar | 52 px: status or safety notice on the left, capsule (main action ↩ · Actions ⌘K) on the right |
+| Actions menu (⌘K) | 320 px, radius 12, popover color, 32 px items with keycaps, above the capsule |
 | Popup | 400 px wide, padding 14, height follows content (4–7 rows) |
-| Popup row | 44 px, padding 8, radius 7 |
-| Input (popup) | 30 px, radius 7, muted filled background |
+| Popup row | 44 px, padding 8, radius 10, 26 px tile |
+| Input (popup) | 30 px, fully rounded, faint foreground wash |
 | Lists | palette: what fits in 475 pt (about 7 rows); popup: 4–7 rows; then scroll |
 | Gaps | 6 / 8 / 10 / 12 px |
 
@@ -38,7 +43,7 @@ When in doubt, remove it.
 
 | Use | Style |
 |---|---|
-| Palette search | 17 px regular |
+| Palette search | 20 px regular |
 | Section label | 11 px medium, muted |
 | Row name | 13 px medium |
 | Row source, status, hints | 11–12 px regular, muted |
@@ -54,7 +59,9 @@ GPUI Kit `IconName` where available; otherwise Lucide-style SVGs in `assets/icon
 | Target / project | folder |
 | Suggested | sparkles (muted, small) |
 | Loadout | layers |
-| Selected / unselected | circle-check / circle |
+| Selected / unselected | tile filled with primary and a check / the row's own tile |
+| Skill tile | source owner's initial, tinted with a theme chart color picked by owner |
+| Loadout tile | layers |
 | Installed | check |
 | Pinned | pin |
 | Safety finding | shield-alert (warning color) |

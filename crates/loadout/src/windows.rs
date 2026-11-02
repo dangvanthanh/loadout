@@ -61,6 +61,8 @@ fn open_palette(state: Entity<AppState>, cx: &mut App) -> Result<AnyWindowHandle
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
+        // Frosted glass behind the views' tinted backgrounds, like Tinycast.
+        window_background: WindowBackgroundAppearance::Blurred,
         display_id: display.map(|display| display.id()),
         ..Default::default()
     };
@@ -161,6 +163,8 @@ fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
+        // Frosted glass behind the views' tinted backgrounds, like Tinycast.
+        window_background: WindowBackgroundAppearance::Blurred,
         display_id: Some(display_id),
         ..Default::default()
     };

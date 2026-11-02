@@ -101,29 +101,27 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ### Palette (⌃⌥L) — the main surface, 750 × 475 pt
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ ⌕ Search favorites and loadouts                                                │
-│ Into: shop-dashboard · Next.js, Tailwind                              from Zed │
-├────────────────────────────────────────────────────────────────────────────────┤
-│ ✦ Suggested for Next.js, Tailwind                                              │
-│ ◉ frontend-design                                       anthropics/skills      │
-│ ◉ vercel-react-best-practices                  vercel-labs/agent-skills    ✓   │
+╭────────────────────────────────────────────────────────────────────────────────╮
+│ ⌕  Search favorites and loadouts                        ( 📁 shop-dashboard ⌄ )│
+│ Suggested for Next.js, React                                                   │
+│▕[✓] vercel-react-best-practices                        vercel-labs/agent-skills▏│
+│ [A] frontend-design                            Update  anthropics/skills       │
 │ Loadouts                                                                       │
-│ ○ ≡ Web app                                     4 skills · prefers Pi          │
+│ [≡] Web app                                            3 skills · prefers Pi   │
 │ Other favorites                                                                │
-│ ○ tdd                                                   mattpocock/skills      │
-│ ○ deploy-helper                                  acme/ops        ⚠   Update    │
+│ [M] tdd                                                mattpocock/skills       │
+│ [A] deploy-helper                              ⚠       acme/ops                │
 │                                                                                │
-├────────────────────────────────────────────────────────────────────────────────┤
-│ ↩ Install 1 skill · ⌘↩ + open Pi           ↑↓ move · space select · ⌘P project │
-└────────────────────────────────────────────────────────────────────────────────┘
+│ status / safety notice              ( Install 1 skill ↩ │ Actions ⌘K )         │
+╰────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 - Fixed size, like Tinycast's palette (750 × 475 pt, top edge 18% down the screen), so it never jumps as rows
   change; the list area also holds the preview (⌘Y), diff against loadout (⌘D), and project chooser (⌘P).
 - Typing filters. ↑↓ move, Space/Tab toggles, Return installs selected (already-installed ones are skipped).
 - ⌘↩ = install + open the preferred agent. ⌘S saves the selection as a loadout. ⌘⌫ twice uninstalls.
-- "Into" line: ⌘P to switch project or choose Global.
+- The target chip on the search row: click it or ⌘P to switch project or choose Global.
+- Actions ⌘K lists every action for the highlighted row with its shortcut, like Tinycast.
 - Section labels here are the one exception to "no section titles": they explain *why* something is selected.
 
 ### Menu bar popup — 400 pt, for glancing and managing

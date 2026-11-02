@@ -11,18 +11,15 @@ use loadout_core::{provenance, share};
 
 use crate::Quit;
 use crate::state::{AppState, ChangesState, CheckReason};
-use crate::views::palette::update_pill;
+use crate::views::palette::{Glyph, tile, update_pill};
 use crate::views::settings::SettingsView;
 use crate::windows;
-
-actions!(popup, [Dismiss]);
 
 const CONTEXT: &str = "Popup";
 /// Wide enough for a name, its source, and the Update pill on one row (DECISIONS 047).
 pub const WIDTH: Pixels = px(400.);
 const PADDING: Pixels = px(14.);
 const INPUT_HEIGHT: Pixels = px(30.);
-const NOTICE_HEIGHT: Pixels = px(18.);
 const ROW_HEIGHT: Pixels = px(44.);
 const UPDATE_BAR_HEIGHT: Pixels = px(28.);
 const TARGET_HEIGHT: Pixels = px(24.);
@@ -31,9 +28,9 @@ const GAP: Pixels = px(8.);
 const MIN_ROWS: usize = 4;
 const MAX_ROWS: usize = 7;
 
-pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
-}
+// No Esc binding: bindings run before key listeners, so it would close the popup before
+// `on_key_down` could cancel an edit or leave a view.
+pub fn init(_: &mut App) {}
 
 /// Window height for `favorites` rows: four to seven, then the list scrolls (other views share
 /// the list area). The update bar only when something is pending.
@@ -44,15 +41,7 @@ pub fn height(favorites: usize, updates: bool) -> Pixels {
     } else {
         px(0.)
     };
-    PADDING * 2.
-        + TARGET_HEIGHT
-        + INPUT_HEIGHT
-        + NOTICE_HEIGHT
-        + list
-        + bar
-        + px(1.)
-        + FOOTER_HEIGHT
-        + GAP * 5.
+    PADDING * 2. + TARGET_HEIGHT + INPUT_HEIGHT + list + bar + px(1.) + FOOTER_HEIGHT + GAP * 4.
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -262,15 +251,11 @@ impl Popup {
         } else if self.view != View::Favorites {
             self.set_view(View::Favorites, cx);
         } else {
-            return;
+            windows::popup_closed(cx);
+            window.remove_window();
         }
         cx.stop_propagation();
         cx.notify();
-    }
-
-    fn dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
-        windows::popup_closed(cx);
-        window.remove_window();
     }
 
     fn render_favorite(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -285,6 +270,7 @@ impl Popup {
             .editing
             .filter(|(editing, _)| *editing == id)
             .map(|(_, f)| f);
+        let source = favorite.source.clone();
         let mut subtitle = favorite.source.clone();
         if favorite.skill.is_none() {
             subtitle += " · all skills";
@@ -292,7 +278,7 @@ impl Popup {
         if !favorite.tags.is_empty() {
             subtitle = format!("{subtitle} · {}", favorite.tags.join(", "));
         }
-        let hover = theme.list_hover;
+        let hover = theme.foreground.opacity(0.05);
         let this = cx.entity().downgrade();
         let menu_item = move |label: &'static str, action: RowAction| {
             let this = this.clone();
@@ -310,8 +296,9 @@ impl Popup {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(7.))
+            .rounded(px(10.))
             .hover(move |s| s.bg(hover))
+            .child(tile(false, Glyph::for_source(&source), cx))
             .child(
                 div()
                     .flex_1()
@@ -578,9 +565,9 @@ impl Popup {
             })
             .flatten();
         let label: SharedString = match (&current, global) {
-            (_, true) => "Into: Global".into(),
-            (Some(path), false) => format!("Into: {}", folder_name(path)).into(),
-            (None, false) => "Into: no project yet".into(),
+            (_, true) => "Global".into(),
+            (Some(path), false) => folder_name(path).into(),
+            (None, false) => "No project yet".into(),
         };
         let projects: Vec<std::path::PathBuf> =
             state.recent_projects().into_iter().take(10).collect();
@@ -593,8 +580,10 @@ impl Popup {
                 Button::new("target")
                     .ghost()
                     .xsmall()
+                    .rounded_full()
+                    .icon(IconName::Folder)
                     .label(label)
-                    .icon(IconName::ChevronDown)
+                    .dropdown_caret(true)
                     .tooltip("Where installs go")
                     .dropdown_menu(move |menu, _, _| {
                         let mut menu = menu;
@@ -711,7 +700,7 @@ impl Popup {
                 format!("{subtitle} · {}", tags.join(", "))
             };
             let theme = cx.theme();
-            let hover = theme.list_hover;
+            let hover = theme.foreground.opacity(0.05);
             let this = cx.entity().downgrade();
             let menu_item = move |label: &'static str, action: LoadoutAction| {
                 let this = this.clone();
@@ -742,7 +731,7 @@ impl Popup {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .rounded(px(7.))
+                    .rounded(px(10.))
                     .hover(move |s| s.bg(hover))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -982,7 +971,7 @@ impl Popup {
         let mut items = vec![self.view_header(title, View::Loadouts, cx)];
         for (ix, (favorite, name, source)) in favorites.into_iter().enumerate() {
             let theme = cx.theme();
-            let hover = theme.list_hover;
+            let hover = theme.foreground.opacity(0.05);
             let icon = if members.contains(&favorite) {
                 Icon::new(IconName::CircleCheck).text_color(theme.primary)
             } else {
@@ -997,7 +986,7 @@ impl Popup {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .rounded(px(7.))
+                    .rounded(px(10.))
                     .hover(move |s| s.bg(hover))
                     .cursor_pointer()
                     .on_click(move |_, _, cx| {
@@ -1180,39 +1169,31 @@ impl Render for Popup {
         };
         div()
             .key_context(CONTEXT)
-            .on_action(cx.listener(Self::dismiss))
             .capture_key_down(cx.listener(Self::on_key_down))
             .size_full()
             .p(PADDING)
             .flex()
             .flex_col()
             .gap(GAP)
-            .bg(theme.background)
+            // Glass: the window blurs what's behind it; this tint keeps text readable.
+            .bg(theme.background.opacity(0.78))
             .text_color(theme.foreground)
             .text_size(px(13.))
             .child(target)
             .child(
                 div()
                     .h(INPUT_HEIGHT)
-                    .px_2()
+                    .px_3()
                     .flex()
                     .items_center()
-                    .rounded(px(7.))
-                    .bg(theme.muted)
+                    .rounded_full()
+                    .bg(theme.foreground.opacity(0.06))
                     .child(
                         Input::new(&self.paste)
                             .appearance(false)
                             .small()
                             .prefix(Icon::new(IconName::Plus).text_color(theme.muted_foreground)),
                     ),
-            )
-            .child(
-                div()
-                    .h(NOTICE_HEIGHT)
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .truncate()
-                    .children(notice),
             )
             .child(
                 div()
@@ -1262,7 +1243,6 @@ impl Render for Popup {
                         ),
                 )
             })
-            .child(div().h(px(1.)).bg(theme.border))
             .child(
                 div()
                     .h(FOOTER_HEIGHT)
@@ -1276,7 +1256,8 @@ impl Render for Popup {
                             .truncate()
                             .text_size(px(11.))
                             .text_color(theme.muted_foreground)
-                            .children(check_status),
+                            // A fresh notice ("Added pdf") wins over the check status.
+                            .children(notice.or(check_status)),
                     )
                     .child(
                         Button::new("check")
