@@ -66,6 +66,21 @@ fn repo_key(source: &str) -> Option<String> {
     Some(format!("{}/{}", skill_ref.repo.owner, skill_ref.repo.name).to_lowercase())
 }
 
+/// The names `skills remove` needs for `favorite`: what the project actually has for it,
+/// else its own skill name (installs Loadout recorded but can't see, e.g. global ones).
+pub fn names_to_remove(installed: &Installed, favorite: &Favorite) -> Vec<String> {
+    let found: Vec<String> = installed
+        .matching(favorite)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    if !found.is_empty() {
+        return found;
+    }
+    let own = favorite.skill.as_deref().filter(|s| !s.trim().is_empty());
+    own.map(updates::normalize).into_iter().collect()
+}
+
 impl Installed {
     pub fn contains(&self, favorite: &Favorite) -> bool {
         !self.matching(favorite).is_empty()
@@ -171,6 +186,24 @@ mod tests {
         assert!(found.contains(&favorite("frontend-design", url, None)));
         assert!(found.contains(&favorite("skills", "anthropics/skills", None)));
         assert!(!found.contains(&favorite("skills", "mattpocock/skills", None)));
+    }
+
+    #[test]
+    fn names_to_remove_prefer_what_is_there() {
+        let found = fixture();
+        let fd = favorite(
+            "Frontend Design",
+            "anthropics/skills",
+            Some("Frontend Design"),
+        );
+        assert_eq!(names_to_remove(&found, &fd), ["frontend-design"]);
+        let whole = favorite("skills", "anthropics/skills", None);
+        assert_eq!(names_to_remove(&found, &whole), ["frontend-design"]);
+        // Not visible here (a global install): its own name.
+        let pdf = favorite("pdf", "anthropics/skills", Some("pdf"));
+        assert_eq!(names_to_remove(&found, &pdf), ["pdf"]);
+        // A whole source that isn't visible: nothing to name, so nothing to run.
+        assert!(names_to_remove(&found, &favorite("x", "acme/kit", None)).is_empty());
     }
 
     #[test]

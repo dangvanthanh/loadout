@@ -178,7 +178,7 @@ Quiet daily/weekly summary notification when real updates exist. Setting to enab
 Projects menu, Global target, settings panel (hotkey, agents, digest, launch default, GitHub token).
 **Accept:** all settings persist and affect behavior.
 
-### [ ] T5.4 Uninstall, token, keyboard polish
+### [x] T5.4 Uninstall, token, keyboard polish (2026-11-01)
 Uninstall from a project, Keychain token, full keyboard coverage, accessibility labels.
 **Accept:** uninstall works; token is used for higher GitHub rate limits.
 

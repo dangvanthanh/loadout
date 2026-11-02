@@ -421,3 +421,24 @@ falls back to ⌃⌥L with a notice.
 **Verified:** a saved custom shortcut registered at startup; a malformed one was refused and a new one applied and
 saved; agents normalised to "codex, cursor"; picking a Vue project targeted it as "chosen"; Global persisted; the
 Settings view and the ⌘P chooser rendered.
+
+## 045 — Uninstall, the GitHub token, and keyboard coverage
+**Uninstall:** in the palette, ⌘⌫ on an installed row asks once ("⌘⌫ again removes tdd from shop") and the second
+press runs `npx -y skills remove '<names>' -a <agents> [-g] -y`. Right-click → Uninstall in the palette, or
+"Uninstall from this project" in the popup, runs it directly. The names come from what the project actually has (lock
+file / agent folders, so a whole-source favorite removes each of its skills), else the favorite's own skill name.
+A success drops the install record and appends a `remove` provenance entry ("Removed tdd from shop"). The skill
+stays a favorite, and having been installed once means no new safety glance.
+**Token:** `security-framework` (listed in ARCHITECTURE's dependency table for this, already in Cargo.lock) keeps it
+in the login Keychain, service `local.loadout.app`, never in data.json. It's read in the background at launch (the
+Keychain may ask) and sent as `Authorization: Bearer` on every GitHub API call: update checks, version reads,
+what-changed, and safety-scan listings. Raw file reads don't need it. Settings has a masked field: Return saves,
+empty removes. GitHub's 401 becomes "GitHub didn't accept your token. Check it in Settings." The rate-limit message
+now suggests adding one. Rebuilt ad-hoc-signed apps may be asked again for Keychain access.
+**Keyboard:** the popup adds ⌘, Settings, ⌘L Loadouts, ⌘R check, ⌘U update all (other ⌘ keys still reach the text
+fields). The palette adds ⌘⌫ and ⌘P (T5.3) on top of ↑↓ / Space / Tab / Return / ⌘↩ / ⌘S / ⌘D / ⌘Y / Esc.
+Icon-only buttons have tooltips and accessibility labels. Clickable rows are plain elements without labels yet;
+VoiceOver reads their text.
+**Verified:** a real install then uninstall emptied the project (`skills-lock.json` → no skills), and History
+showed both. A bogus token produced GitHub's rejection message, which proves the header is sent. Saving to the
+Keychain was not exercised here, to keep test runs out of your login Keychain.

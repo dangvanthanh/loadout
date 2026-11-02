@@ -107,6 +107,8 @@ pub struct Palette {
     diff_selected: HashSet<Uuid>,
     /// Index into the diff's missing skills.
     diff_highlight: usize,
+    /// The first ⌘⌫ on an installed row; a second one removes it.
+    confirm_uninstall: Option<Uuid>,
     /// The project chooser (⌘P) shows in the list area; index into `target_choices`.
     choosing: Option<usize>,
     scroll: ScrollHandle,
@@ -171,6 +173,7 @@ impl Palette {
             diff_selected: HashSet::new(),
             diff_highlight: 0,
             choosing: None,
+            confirm_uninstall: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -504,6 +507,28 @@ impl Palette {
             cx.stop_propagation();
             return;
         }
+        // ⌘⌫ removes the highlighted installed skill from the target; it asks once first.
+        let confirming = self.confirm_uninstall.take();
+        if modifiers.platform && key == "backspace" {
+            let highlighted = self
+                .visible(cx)
+                .get(self.highlight)
+                .map(|&ix| &self.rows[ix]);
+            if let Some(row) = highlighted.filter(|r| r.installed && !r.loadout) {
+                let id = row.id;
+                if confirming == Some(id) {
+                    self.state.update(cx, |state, cx| state.uninstall(id, cx));
+                } else {
+                    self.confirm_uninstall = Some(id);
+                }
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if confirming.is_some() {
+            cx.notify();
+        }
         // ⌘P picks where installs go; again closes the chooser.
         if modifiers.platform && key == "p" {
             self.choosing = match self.choosing {
@@ -678,7 +703,20 @@ impl Palette {
                 )
             });
         if !is_loadout {
-            return element.into_any_element();
+            if !row.installed {
+                return element.into_any_element();
+            }
+            let state = self.state.clone();
+            return element
+                .context_menu(move |menu, _, _| {
+                    let state = state.clone();
+                    menu.item(
+                        PopupMenuItem::new("Uninstall").on_click(move |_, _, cx| {
+                            state.update(cx, |s, cx| s.uninstall(id, cx))
+                        }),
+                    )
+                })
+                .into_any_element();
         }
         element
             .context_menu(move |menu, _, _| {
@@ -1040,6 +1078,22 @@ impl Render for Palette {
                 .count()
         });
         let loadout_highlighted = self.highlighted_loadout(cx).is_some();
+        let confirm: Option<SharedString> = self.confirm_uninstall.and_then(|id| {
+            let name = self.rows.iter().find(|r| r.id == id)?.name.clone();
+            let state = self.state.read(cx);
+            let place = if state.data.settings.global {
+                "Global".to_string()
+            } else {
+                state
+                    .target
+                    .root
+                    .as_ref()?
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            Some(format!("⌘⌫ again removes {name} from {place}").into())
+        });
         // "· ⌘↩ + open Pi", or "+ open Pi" when Return opens it anyway.
         let launch_hint = {
             let state = self.state.read(cx);
@@ -1157,6 +1211,7 @@ impl Render for Palette {
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
                     .child(match (self.naming, status, notice.is_some(), diff_count) {
+                        _ if confirm.is_some() => confirm.clone().unwrap_or_default(),
                         (true, ..) => "↩ Save as loadout".into(),
                         (false, Some(status), ..) => status,
                         (false, None, true, _) => "↩ Install anyway".into(),

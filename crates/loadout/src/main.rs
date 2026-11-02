@@ -33,6 +33,7 @@ fn main() {
         views::popup::init(cx);
         let state = cx.new(|_| state::AppState::new());
         cx.set_global(state::GlobalAppState(state.clone()));
+        state.update(cx, |state, cx| state.load_token(cx));
         cx.on_system_notification_response(|_, cx| windows::show_popup(cx));
         let ticker = state.clone();
         cx.spawn(async move |cx| {

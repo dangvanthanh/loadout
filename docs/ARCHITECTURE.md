@@ -95,6 +95,7 @@ loadout/
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
         login_item.rs             SMAppService
+        keychain.rs               GitHub token in the login Keychain (security-framework)
         url_scheme.rs             loadout:// and opened-file events, drained by the main poll loop
         launch.rs                 open agent via URL scheme / CLI
     loadout/assets/           tray/menubar@2x.png (template), icons/ only if GPUI Kit's set lacks one

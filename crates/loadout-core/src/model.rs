@@ -235,6 +235,13 @@ impl SavedState {
         }
     }
 
+    /// Forgets an install record (after `skills remove`).
+    pub fn mark_removed(&mut self, project: Option<Uuid>, favorite: Uuid) -> bool {
+        self.installed
+            .remove(&installed_key(project, favorite))
+            .is_some()
+    }
+
     /// Sets the version after an update, replacing whatever was recorded.
     pub fn set_installed_version(&mut self, project: Option<Uuid>, favorite: Uuid, version: &str) {
         self.installed
@@ -791,6 +798,21 @@ mod tests {
             installed_key(None, fav),
             "global|E621E1F8-C36C-495A-93FC-0C247A3E6E5F"
         );
+    }
+
+    #[test]
+    fn mark_removed_drops_one_record() {
+        let mut state = SavedState::default();
+        let shop = state.project_id(std::path::Path::new("/Code/shop"));
+        let fav = Uuid::new_v4();
+        state.mark_installed(Some(shop), fav, Some("v1"));
+        state.mark_installed(None, fav, Some("v1"));
+        assert!(state.mark_removed(Some(shop), fav));
+        assert!(!state.is_installed(Some(shop), fav));
+        assert!(state.is_installed(None, fav));
+        assert!(!state.mark_removed(Some(shop), fav));
+        // The skill was installed once, so it isn't a first install again.
+        assert!(state.ever_installed(fav));
     }
 
     #[test]

@@ -92,7 +92,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Shared team loadouts with versioning (U10)
 - ✅ Idle “what changed” digest (U11)
 - ✅ Popup window parity (projects menu, Global target, settings)
-- ⬜ Uninstall from a project, GitHub token in Keychain, keyboard navigation
+- ✅ Uninstall from a project, GitHub token in Keychain, keyboard navigation
 - ⬜ Icon, signed + notarized universal release, Homebrew cask
 
 ## Screens

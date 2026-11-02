@@ -13,6 +13,7 @@ pub struct SettingsView {
     state: Entity<AppState>,
     hotkey: Entity<InputState>,
     agents: Entity<InputState>,
+    token: Entity<InputState>,
     hotkey_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -30,7 +31,21 @@ impl SettingsView {
                 .placeholder("Let the skills CLI detect agents")
                 .default_value(settings.agents.clone())
         });
+        let token = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("ghp_… (optional)")
+                .masked(true)
+                .default_value(state.read(cx).token.clone().unwrap_or_default())
+        });
         let _subscriptions = vec![
+            cx.subscribe(&token, |this, input, event: &InputEvent, cx| {
+                // Only Return saves: a half-pasted token shouldn't reach the Keychain on blur.
+                if let InputEvent::PressEnter { .. } = event {
+                    let text = input.read(cx).value().to_string();
+                    this.state
+                        .update(cx, |state, cx| state.set_token(&text, cx));
+                }
+            }),
             cx.observe(&state, |_, _, cx| cx.notify()),
             cx.subscribe(&hotkey, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
@@ -57,6 +72,7 @@ impl SettingsView {
             state,
             hotkey,
             agents: agent_list,
+            token,
             hotkey_error: None,
             _subscriptions,
         }
@@ -81,6 +97,7 @@ impl Render for SettingsView {
         } else {
             format!("Installs for {}.", agent_names.join(", ")).into()
         };
+        let has_token = state.token.is_some();
         let (auto_check, launch_after, login_on) = (
             settings.auto_check,
             settings.launch_after_install,
@@ -134,6 +151,16 @@ impl Render for SettingsView {
             .child(label("Agents"))
             .child(Input::new(&self.agents).small())
             .child(hint(agents_hint))
+            .child(label("GitHub token"))
+            .child(Input::new(&self.token).small().mask_toggle())
+            .child(hint(
+                if has_token {
+                    "Saved in your Keychain. GitHub allows 5,000 requests an hour with it."
+                } else {
+                    "Optional. Without one, GitHub allows 60 requests an hour. Return saves it in your Keychain."
+                }
+                .into(),
+            ))
             .child(label("Update digest"))
             .child(
                 div()

@@ -224,6 +224,33 @@ impl Popup {
 
     /// Esc cancels an edit, then leaves a secondary view, before it can close the popup.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform && !modifiers.shift && !modifiers.alt && !modifiers.control {
+            let handled = match event.keystroke.key.as_str() {
+                "," => {
+                    self.set_view(View::Settings, cx);
+                    true
+                }
+                "l" => {
+                    self.set_view(View::Loadouts, cx);
+                    true
+                }
+                "r" => {
+                    self.state
+                        .update(cx, |s, cx| s.check_for_updates(CheckReason::Manual, cx));
+                    true
+                }
+                "u" => {
+                    self.state.update(cx, |s, cx| s.update(None, cx));
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                cx.stop_propagation();
+            }
+            return;
+        }
         if event.keystroke.key != "escape" {
             return;
         }
@@ -252,6 +279,7 @@ impl Popup {
         let id = favorite.id;
         let has_update = state.pending().iter().any(|p| p.favorite == id);
         let pinned = state.data.skill_state(id).pinned;
+        let installed_here = state.is_installed_here(id);
         let editing = self
             .editing
             .filter(|(editing, _)| *editing == id)
@@ -336,7 +364,8 @@ impl Popup {
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::Close)
-                                .tooltip("Remove")
+                                .tooltip("Remove favorite")
+                                .accessibility_label("Remove favorite")
                                 .on_click(move |_, _, cx| {
                                     remove.update(cx, |state, cx| state.remove_favorite(id, cx))
                                 }),
@@ -352,6 +381,12 @@ impl Popup {
                     RowAction::Pin(!pinned),
                 ))
                 .item(menu_item("History", RowAction::History))
+                .when(installed_here, |menu| {
+                    menu.item(menu_item(
+                        "Uninstall from this project",
+                        RowAction::Uninstall,
+                    ))
+                })
                 .separator()
                 .item(menu_item("Rename…", RowAction::Edit(Field::Name)))
                 .item(menu_item("Tags…", RowAction::Edit(Field::Tags)))
@@ -371,6 +406,7 @@ impl Popup {
         match action {
             RowAction::Changes => self.set_view(View::Changes(id), cx),
             RowAction::History => self.set_view(View::History(HistoryFilter::Skill(id)), cx),
+            RowAction::Uninstall => self.state.update(cx, |state, cx| state.uninstall(id, cx)),
             RowAction::Pin(pinned) => self
                 .state
                 .update(cx, |state, cx| state.set_pinned(id, pinned, cx)),
@@ -416,6 +452,7 @@ impl Popup {
                         .xsmall()
                         .icon(IconName::ArrowLeft)
                         .tooltip("Back")
+                        .accessibility_label("Back")
                         .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Favorites, cx))),
                 )
                 .child(
@@ -614,6 +651,7 @@ impl Popup {
                     .xsmall()
                     .icon(IconName::ArrowLeft)
                     .tooltip("Back")
+                    .accessibility_label("Back")
                     .on_click(cx.listener(move |this, _, _, cx| this.set_view(back, cx))),
             )
             .child(
@@ -1090,6 +1128,7 @@ enum LoadoutAction {
 enum RowAction {
     Changes,
     History,
+    Uninstall,
     Pin(bool),
     Edit(Field),
     Remove,
@@ -1243,7 +1282,8 @@ impl Render for Popup {
                             .ghost()
                             .xsmall()
                             .icon(IconName::RotateCw)
-                            .tooltip("Check for updates")
+                            .tooltip("Check for updates (⌘R)")
+                            .accessibility_label("Check for updates")
                             .disabled(checking)
                             .on_click({
                                 let state = self.state.clone();
@@ -1260,6 +1300,7 @@ impl Render for Popup {
                             .xsmall()
                             .icon(IconName::Settings)
                             .tooltip("More")
+                            .accessibility_label("More")
                             .dropdown_menu_with_anchor(Anchor::BottomRight, {
                                 let state = self.state.clone();
                                 let this = cx.entity().downgrade();
@@ -1272,7 +1313,7 @@ impl Render for Popup {
                                         })
                                     };
                                     let importer = state.clone();
-                                    menu.item(view("Loadouts", View::Loadouts))
+                                    menu.item(view("Loadouts ⌘L", View::Loadouts))
                                         .item(item("Import loadout file…").on_click(move |_, _, cx| {
                                             importer.update(cx, |s, cx| s.import_file(cx))
                                         }))
@@ -1281,7 +1322,7 @@ impl Render for Popup {
                                         })
                                         .when(has_log, |menu| menu.item(view("Output", View::Output)))
                                         .separator()
-                                        .item(view("Settings…", View::Settings))
+                                        .item(view("Settings… ⌘,", View::Settings))
                                         .item(item("Quit Loadout").on_click(|_, window, cx| {
                                             window.dispatch_action(Box::new(Quit), cx)
                                         }))

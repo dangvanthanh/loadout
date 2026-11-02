@@ -41,8 +41,10 @@ pub struct Tree {
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
-    #[error("GitHub limit reached. Try again in an hour.")]
+    #[error("GitHub limit reached. Add a token in Settings, or try again in an hour.")]
     RateLimited,
+    #[error("GitHub didn't accept your token. Check it in Settings.")]
+    BadToken,
     #[error("not found on GitHub")]
     NotFound,
     #[error("couldn't reach GitHub: {0}")]
@@ -60,6 +62,8 @@ pub struct CheckResult {
     pub trees: HashMap<Repo, Tree>,
     /// GitHub refused; the check stopped early.
     pub rate_limited: bool,
+    /// GitHub rejected the token; the check stopped early.
+    pub bad_token: bool,
     /// Repos that couldn't be read (renamed, private, offline).
     pub unreachable: Vec<Repo>,
 }
@@ -83,6 +87,10 @@ pub fn check_with(
                 }
                 Err(UpdateError::RateLimited) => {
                     result.rate_limited = true;
+                    break;
+                }
+                Err(UpdateError::BadToken) => {
+                    result.bad_token = true;
                     break;
                 }
                 Err(_) => result.unreachable.push(repo.clone()),
@@ -416,6 +424,7 @@ fn get(url: &str, token: Option<&str>) -> Result<String, UpdateError> {
             .body_mut()
             .read_to_string()
             .map_err(|e| UpdateError::Http(e.to_string())),
+        Err(ureq::Error::StatusCode(401)) => Err(UpdateError::BadToken),
         Err(ureq::Error::StatusCode(403 | 429)) => Err(UpdateError::RateLimited),
         Err(ureq::Error::StatusCode(404 | 409 | 422)) => Err(UpdateError::NotFound),
         Err(err) => Err(UpdateError::Http(err.to_string())),

@@ -1,6 +1,7 @@
 //! macOS glue. Keep `unsafe` small, each with a `// SAFETY:` comment.
 
 pub mod frontmost;
+pub mod keychain;
 pub mod launch;
 pub mod login_item;
 pub mod url_scheme;

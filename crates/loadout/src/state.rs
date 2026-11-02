@@ -81,6 +81,10 @@ pub struct AppState {
     /// An equip waiting for its scans (ids, launch); it runs or shows the notice when they land.
     awaiting: Option<(Vec<Uuid>, bool)>,
     _launch: Option<Task<()>>,
+    /// GitHub token from the Keychain (loaded in the background at launch); raises the API
+    /// limit from 60 to 5,000 requests an hour.
+    pub token: Option<String>,
+    _token: Option<Task<()>>,
     /// A loadout from a link or file, waiting for Import in the popup.
     pub pending_import: Option<SharedLoadout>,
     _share: Option<Task<()>>,
@@ -151,6 +155,7 @@ pub enum ChangesState {
 enum JobKind {
     Install,
     Update,
+    Remove,
 }
 
 /// One `npx skills add` run.
@@ -222,6 +227,8 @@ impl AppState {
             safety_notice: None,
             awaiting: None,
             _launch: None,
+            token: None,
+            _token: None,
             pending_import: None,
             _share: None,
             _scans: Vec::new(),
@@ -555,9 +562,10 @@ impl AppState {
                 }
             }
         }
+        let token = self.token.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { scan_skills(todo, trees) });
+            .spawn(async move { scan_skills(todo, trees, token.as_deref()) });
         self._scans.push(cx.spawn(async move |this, cx| {
             let (results, trees) = task.await;
             this.update(cx, |this, cx| {
@@ -577,6 +585,48 @@ impl AppState {
             .ok();
         }));
         cx.notify();
+    }
+
+    /// Removes `favorite` from the current target with `npx skills remove` (U6: the official CLI
+    /// does the work). Records a `remove` provenance entry and forgets the install record.
+    pub fn uninstall(&mut self, favorite: Uuid, cx: &mut Context<Self>) {
+        if self.installing || !self.is_installed_here(favorite) {
+            return;
+        }
+        let Some(fav) = self
+            .data
+            .favorites
+            .iter()
+            .find(|f| f.id == favorite)
+            .cloned()
+        else {
+            return;
+        };
+        let global = self.data.settings.global;
+        let names = installed::names_to_remove(&self.target.installed, &fav);
+        let mut settings = self.data.settings.clone();
+        settings.global = global;
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let Some(command) = installer::remove_command(&name_refs, &settings) else {
+            self.install_status =
+                Some(format!("Couldn't tell which skills {} installed here.", fav.name).into());
+            cx.notify();
+            return;
+        };
+        let (dir, place) = match (&self.target.root, global) {
+            (Some(root), false) => (Some(root.clone()), project_name(root)),
+            _ => (None, "Global".to_string()),
+        };
+        let scope = self.target_scope().flatten();
+        let job = Job {
+            favorite: fav,
+            kind: JobKind::Remove,
+            scope,
+            dir,
+            command,
+            loadout: None,
+        };
+        self.run_jobs(vec![job], Some(place), None, cx);
     }
 
     /// Updates every pending install of `only` (or of every skill), in each project it's in.
@@ -647,6 +697,8 @@ impl AppState {
     ) {
         let verb = if jobs.iter().all(|j| j.kind == JobKind::Update) {
             "Updating"
+        } else if jobs.iter().all(|j| j.kind == JobKind::Remove) {
+            "Removing"
         } else {
             "Installing"
         };
@@ -658,6 +710,7 @@ impl AppState {
         cx.notify();
 
         let (tx, rx) = mpsc::channel();
+        let token = self.token.clone();
         let work = cx.background_executor().spawn(async move {
             // Listings fetched for versions, one per repo for the whole batch.
             let mut trees = HashMap::new();
@@ -666,8 +719,8 @@ impl AppState {
                 let result = installer::run(&job.command, job.dir.as_deref(), |line| {
                     let _ = tx.send(JobEvent::Line(line.to_string()));
                 });
-                let version = matches!(result, Ok(0))
-                    .then(|| updates::version_now(&job.favorite, &mut trees, None))
+                let version = (matches!(result, Ok(0)) && job.kind != JobKind::Remove)
+                    .then(|| updates::version_now(&job.favorite, &mut trees, token.as_deref()))
                     .flatten();
                 let _ = tx.send(JobEvent::Done {
                     job: Box::new(job),
@@ -720,6 +773,7 @@ impl AppState {
                         this.install_status = Some(summary.clone().into());
                         // Open the agent unless every job failed.
                         let worked = !outcome.installed.is_empty() || !outcome.updated.is_empty();
+                        // An uninstall never opens an agent (`open_after` is None for it).
                         if worked && let Some((agent, Some(dir))) = open_after.take() {
                             this.open_agent(agent, dir, Some(summary), cx);
                         }
@@ -764,6 +818,10 @@ impl AppState {
                         self.data.set_installed_version(job.scope, id, &version);
                         provenance::UPDATE
                     }
+                    JobKind::Remove => {
+                        self.data.mark_removed(job.scope, id);
+                        provenance::REMOVE
+                    }
                 };
                 let mut entry = provenance::entry(action, job.dir.as_deref(), &job.favorite);
                 entry.tree_sha = version;
@@ -779,6 +837,7 @@ impl AppState {
                 match job.kind {
                     JobKind::Install => outcome.installed.push(name),
                     JobKind::Update => outcome.updated.push(name),
+                    JobKind::Remove => outcome.removed.push(name),
                 }
             }
             Ok(code) => {
@@ -1098,6 +1157,7 @@ impl AppState {
             return;
         }
         let tracked = self.data.tracked_favorites();
+        let token = self.token.clone();
         if tracked.is_empty() {
             self.last_checked = Some(provenance::now());
             if reason == CheckReason::Digest {
@@ -1111,15 +1171,19 @@ impl AppState {
         cx.notify();
         let task = cx
             .background_executor()
-            .spawn(async move { updates::check(&tracked, None) });
+            .spawn(async move { updates::check(&tracked, token.as_deref()) });
         self._check = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.checking = false;
                 this.last_checked = Some(provenance::now());
-                this.check_error = result
-                    .rate_limited
-                    .then(|| updates::UpdateError::RateLimited.to_string().into());
+                this.check_error = if result.bad_token {
+                    Some(updates::UpdateError::BadToken.to_string().into())
+                } else {
+                    result
+                        .rate_limited
+                        .then(|| updates::UpdateError::RateLimited.to_string().into())
+                };
                 this.latest.extend(result.latest);
                 this.trees.extend(result.trees);
                 let pending = this.pending();
@@ -1211,10 +1275,12 @@ impl AppState {
         let changes = match (repo, listable) {
             (Some(repo), true) => {
                 let (old, new) = (installed.clone(), latest.clone());
+                let token = self.token.clone();
                 let task = cx.background_executor().spawn(async move {
-                    let old = updates::fetch_tree_at(&repo, &old, None)?;
-                    let new = updates::fetch_tree_at(&repo, &new, None)?;
-                    diff::skill_changes(&old, &new, |sha| updates::fetch_blob(&repo, sha, None))
+                    let token = token.as_deref();
+                    let old = updates::fetch_tree_at(&repo, &old, token)?;
+                    let new = updates::fetch_tree_at(&repo, &new, token)?;
+                    diff::skill_changes(&old, &new, |sha| updates::fetch_blob(&repo, sha, token))
                 });
                 self._changes = Some(cx.spawn(async move |this, cx| {
                     let result = task.await;
@@ -1317,6 +1383,52 @@ impl AppState {
         }
         self.save();
         cx.notify();
+    }
+
+    /// Reads the token from the Keychain off the main thread (it may ask to allow access).
+    pub fn load_token(&mut self, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async { mac::keychain::get() });
+        self._token = Some(cx.spawn(async move |this, cx| {
+            let token = task.await;
+            this.update(cx, |this, cx| {
+                this.token = token;
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Saves the token to the Keychain (empty removes it) and uses it from now on.
+    pub fn set_token(&mut self, token: &str, cx: &mut Context<Self>) {
+        let token = token.trim().to_string();
+        let task = cx.background_executor().spawn({
+            let token = token.clone();
+            async move { mac::keychain::set(&token) }
+        });
+        self._token = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.popup_notice = Some(
+                            if token.is_empty() {
+                                "Removed the GitHub token"
+                            } else {
+                                "Saved the GitHub token"
+                            }
+                            .into(),
+                        );
+                        this.token = (!token.is_empty()).then_some(token);
+                        this.check_error = None;
+                    }
+                    Err(err) => this.popup_notice = Some(err.into()),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// The palette shortcut, e.g. "ctrl+alt+L"; applied at once. False if it can't be used.
@@ -1662,6 +1774,7 @@ impl AppState {
 fn scan_skills(
     favorites: Vec<Favorite>,
     mut trees: HashMap<Repo, Tree>,
+    token: Option<&str>,
 ) -> (Vec<(Uuid, Scan)>, HashMap<Repo, Tree>) {
     let unavailable = |why: &str| Scan::Unavailable(why.to_string().into());
     let mut results = Vec::new();
@@ -1671,7 +1784,7 @@ fn scan_skills(
         };
         let repo = skill_ref.repo.clone();
         if !trees.contains_key(&repo) {
-            match updates::fetch_tree(&repo, None) {
+            match updates::fetch_tree(&repo, token) {
                 Ok(tree) => {
                     trees.insert(repo.clone(), tree);
                 }
@@ -1749,6 +1862,7 @@ struct Outcome {
     applied: Vec<(Uuid, Option<PathBuf>)>,
     installed: Vec<String>,
     updated: Vec<String>,
+    removed: Vec<String>,
     failed: Vec<(String, JobKind)>,
     npx_missing: bool,
 }
@@ -1771,16 +1885,26 @@ impl Outcome {
                 skills(&self.installed),
                 skills(&self.updated)
             ),
+            (true, true) if !self.removed.is_empty() => {
+                format!("Removed {}", skills(&self.removed))
+            }
             (true, true) => String::new(),
         };
         if let Some(place) = place.filter(|_| !done.is_empty()) {
-            done += &format!(" in {place}");
+            let preposition = if self.removed.is_empty() {
+                "in"
+            } else {
+                "from"
+            };
+            done += &format!(" {preposition} {place}");
         }
         if self.failed.is_empty() {
             return done;
         }
         let verb = if self.failed.iter().all(|(_, k)| *k == JobKind::Update) {
             "update"
+        } else if self.failed.iter().all(|(_, k)| *k == JobKind::Remove) {
+            "remove"
         } else {
             "install"
         };
