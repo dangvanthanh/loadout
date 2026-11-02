@@ -7,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::diff::{ChangeKind, LineKind};
 use loadout_core::model::{ProvenanceEntry, Uuid};
-use loadout_core::provenance;
+use loadout_core::{provenance, share};
 
 use crate::Quit;
 use crate::macos::login_item::LoginItem;
@@ -52,6 +52,8 @@ enum Field {
     LoadoutName,
     LoadoutTags,
     LoadoutAgent,
+    LoadoutVersion,
+    LoadoutSource,
 }
 
 /// What the list area shows.
@@ -137,6 +139,8 @@ impl Popup {
                                 Field::LoadoutName => state.rename_loadout(id, &text, cx),
                                 Field::LoadoutTags => state.set_loadout_tags(id, &text, cx),
                                 Field::LoadoutAgent => state.set_loadout_agent(id, &text, cx),
+                                Field::LoadoutVersion => state.set_loadout_version(id, &text, cx),
+                                Field::LoadoutSource => state.set_loadout_source(id, &text, cx),
                             });
                         }
                         this.paste.update(cx, |paste, cx| paste.focus(window, cx));
@@ -180,6 +184,8 @@ impl Popup {
             (Field::LoadoutName, _, Some(l)) => l.name.clone(),
             (Field::LoadoutTags, _, Some(l)) => l.tags.join(", "),
             (Field::LoadoutAgent, _, Some(l)) => l.preferred_agent.clone().unwrap_or_default(),
+            (Field::LoadoutVersion, _, Some(l)) => l.version.clone().unwrap_or_default(),
+            (Field::LoadoutSource, _, Some(l)) => l.source.clone().unwrap_or_default(),
             _ => return,
         };
         self.editing = Some((id, field));
@@ -548,20 +554,25 @@ impl Popup {
             );
             return items;
         }
-        let rows: Vec<(Uuid, String, String, Vec<String>)> = state
+        let rows: Vec<(Uuid, String, String, Vec<String>, bool)> = state
             .data
             .loadouts
             .iter()
             .map(|l| {
+                let mut subtitle = state.loadout_subtitle(l.id);
+                if let Some(version) = &l.version {
+                    subtitle += &format!(" · version {version}");
+                }
                 (
                     l.id,
                     l.name.clone(),
-                    state.loadout_subtitle(l.id),
+                    subtitle,
                     l.tags.clone(),
+                    l.source.is_some(),
                 )
             })
             .collect();
-        for (ix, (id, name, subtitle, tags)) in rows.into_iter().enumerate() {
+        for (ix, (id, name, subtitle, tags, has_source)) in rows.into_iter().enumerate() {
             let editing = self
                 .editing
                 .filter(|(editing, _)| *editing == id)
@@ -585,6 +596,9 @@ impl Popup {
                         LoadoutAction::SaveFile => this
                             .state
                             .update(cx, |state, cx| state.save_loadout_file(id, cx)),
+                        LoadoutAction::CheckSource => this
+                            .state
+                            .update(cx, |state, cx| state.check_loadout_source(id, cx)),
                         LoadoutAction::Remove => this
                             .state
                             .update(cx, |state, cx| state.remove_loadout(id, cx)),
@@ -631,9 +645,12 @@ impl Popup {
                                     .into_any_element(),
                             })
                             .child(match editing {
-                                Some(Field::LoadoutTags | Field::LoadoutAgent) => {
-                                    Input::new(&self.edit).small().into_any_element()
-                                }
+                                Some(
+                                    Field::LoadoutTags
+                                    | Field::LoadoutAgent
+                                    | Field::LoadoutVersion
+                                    | Field::LoadoutSource,
+                                ) => Input::new(&self.edit).small().into_any_element(),
                                 _ => div()
                                     .text_size(px(11.))
                                     .text_color(theme.muted_foreground)
@@ -652,6 +669,21 @@ impl Popup {
                             LoadoutAction::Edit(Field::LoadoutAgent),
                         ))
                         .item(menu_item("Tags…", LoadoutAction::Edit(Field::LoadoutTags)))
+                        .separator()
+                        .item(menu_item(
+                            "Version…",
+                            LoadoutAction::Edit(Field::LoadoutVersion),
+                        ))
+                        .item(menu_item(
+                            "Source URL…",
+                            LoadoutAction::Edit(Field::LoadoutSource),
+                        ))
+                        .when(has_source, |menu| {
+                            menu.item(menu_item(
+                                "Check for a newer version",
+                                LoadoutAction::CheckSource,
+                            ))
+                        })
                         .separator()
                         .item(menu_item("Copy link", LoadoutAction::CopyLink))
                         .item(menu_item("Save file…", LoadoutAction::SaveFile))
@@ -672,12 +704,34 @@ impl Popup {
         };
         let theme = cx.theme();
         let muted = theme.muted_foreground;
-        let replaces = state
+        // What importing does to your same-named loadout, if any: (sentence, warn).
+        let yours = state
             .data
             .loadouts
             .iter()
-            .find(|l| l.name.eq_ignore_ascii_case(&shared.name))
-            .map(|l| l.name.clone());
+            .find(|l| l.name.eq_ignore_ascii_case(&shared.name));
+        let change: Option<(String, bool)> = match share::version_change(&state.data, shared) {
+            share::VersionChange::New => None,
+            share::VersionChange::Newer => yours.map(|l| {
+                let from = l
+                    .version
+                    .as_ref()
+                    .map_or_else(String::new, |v| format!(" from version {v}"));
+                (format!("Updates your {}{from}.", l.name), false)
+            }),
+            share::VersionChange::Same => Some(("You already have this version.".into(), false)),
+            share::VersionChange::Older { yours } => Some((
+                format!("Older than yours (version {yours}); importing goes back to it."),
+                true,
+            )),
+            share::VersionChange::Unversioned => Some((
+                format!(
+                    "Replaces the skills and agent of your loadout {}.",
+                    shared.name
+                ),
+                true,
+            )),
+        };
         let mut summary = format!(
             "{} skill{}",
             shared.skills.len(),
@@ -712,14 +766,12 @@ impl Popup {
                 .child(summary)
                 .into_any_element(),
         ];
-        if let Some(name) = replaces {
+        if let Some((text, warn)) = change {
             items.push(
                 div()
                     .text_size(px(11.))
-                    .text_color(theme.warning)
-                    .child(format!(
-                        "Replaces the skills and agent of your loadout {name}."
-                    ))
+                    .text_color(if warn { theme.warning } else { muted })
+                    .child(text)
                     .into_any_element(),
             );
         }
@@ -939,6 +991,7 @@ impl Popup {
 #[derive(Clone, Copy)]
 enum LoadoutAction {
     Edit(Field),
+    CheckSource,
     CopyLink,
     SaveFile,
     Remove,

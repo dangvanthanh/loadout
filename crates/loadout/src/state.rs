@@ -915,6 +915,7 @@ impl AppState {
             return;
         };
         let imported = share::import(&mut self.data, &shared);
+        provenance::append(&mut self.data, share::provenance_entry(&shared, &imported));
         let skills = match imported.new_favorites {
             0 => String::new(),
             1 => " and 1 new favorite".into(),
@@ -927,6 +928,69 @@ impl AppState {
         };
         self.popup_notice = Some(format!("{verb} {}{skills}", imported.name).into());
         self.save();
+        cx.notify();
+    }
+
+    /// Fetches a team loadout's source; previews it if it's newer than yours.
+    pub fn check_loadout_source(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        let Some((name, url)) = self
+            .data
+            .loadout(id)
+            .and_then(|l| Some((l.name.clone(), l.source.clone()?)))
+        else {
+            return;
+        };
+        self.popup_notice = Some(format!("Checking {name}…").into());
+        cx.notify();
+        let task = cx
+            .background_executor()
+            .spawn(async move { share::fetch(&url) });
+        self._share = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.popup_notice = match result {
+                    Ok(shared) => match share::version_change(&this.data, &shared) {
+                        share::VersionChange::Newer | share::VersionChange::New => {
+                            this.pending_import = Some(shared);
+                            None
+                        }
+                        _ => Some(
+                            match &shared.version {
+                                Some(v) => format!("{name} is up to date (version {v})"),
+                                None => format!("{name} is up to date"),
+                            }
+                            .into(),
+                        ),
+                    },
+                    Err(err) => Some(err.to_string().into()),
+                };
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Empty clears it.
+    pub fn set_loadout_version(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
+        let version = text.trim();
+        if version.chars().any(char::is_control) || version.chars().count() > 80 {
+            self.popup_notice = Some("That version has characters Loadout can't keep.".into());
+        } else if let Some(loadout) = self.data.loadouts.iter_mut().find(|l| l.id == id) {
+            loadout.version = (!version.is_empty()).then(|| version.to_string());
+            self.save();
+        }
+        cx.notify();
+    }
+
+    /// An https URL to the published `.loadout.json`; empty clears it.
+    pub fn set_loadout_source(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
+        let url = text.trim();
+        if !url.is_empty() && !share::is_https(url) {
+            self.popup_notice = Some(share::ShareError::NotHttps.to_string().into());
+        } else if let Some(loadout) = self.data.loadouts.iter_mut().find(|l| l.id == id) {
+            loadout.source = (!url.is_empty()).then(|| url.to_string());
+            self.save();
+        }
         cx.notify();
     }
 

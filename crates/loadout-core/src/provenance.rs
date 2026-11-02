@@ -11,6 +11,7 @@ pub const INSTALL: &str = "install";
 pub const UPDATE: &str = "update";
 pub const REMOVE: &str = "remove";
 pub const APPLY_LOADOUT: &str = "apply_loadout";
+pub const IMPORT_LOADOUT: &str = "import_loadout";
 
 /// Unix seconds now.
 pub fn now() -> u64 {
@@ -38,6 +39,7 @@ pub fn describe(entry: &ProvenanceEntry, now: u64) -> String {
         UPDATE => "Updated",
         REMOVE => "Removed",
         APPLY_LOADOUT => "Applied",
+        IMPORT_LOADOUT => "Imported",
         other => other,
     };
     let what = entry.skill_name.as_deref().unwrap_or(&entry.skill_source);

@@ -377,3 +377,19 @@ anything and never installs. Installing still goes through the palette, the safe
 **Verified:** on a clean `HOME`, a malformed link only showed a notice; a link and then a file, delivered through
 the AppKit open-URL path, previewed, imported (2 new favorites, agent pi), and re-importing updated the same loadout
 without duplicating favorites.
+
+## 042 — Team loadouts: version + https source, no signatures yet
+**Choice:** A team publishes a `.loadout.json` somewhere reachable over https (a raw GitHub URL works) with
+`version` and `source` set. A loadout's right-click menu gets Version…, Source URL… (https only), and, once a
+source is set, "Check for a newer version". That fetches the file (≤ 256 KB, the same validation as any import)
+and opens the import preview only if its version is newer. Versions compare by numeric parts ("1.10" > "1.9",
+"v2" = "2"). The preview names the change ("Updates your Web app from version 1.1", "Older than yours (version
+1.3); importing goes back to it", or a replace warning for unversioned files). Every import appends an
+`import_loadout` provenance entry ("Imported Web app · version 1.2"), and the loadout keeps `version` and `source`
+in `data.json`. Installing still goes through the palette and the official CLI.
+**Not done: signatures.** Signing needs a crypto dependency and a way to distribute and trust keys, both of which
+need the owner's OK (AGENTS.md). The trust model today: you choose the source URL; every import is previewed and
+validated; nothing installs without the palette and the safety glance. Checks are manual, not part of the 6-hour
+update check.
+**Verified:** a v1.2 file imported with its version and source and appeared in History; a v1.1 file previewed as
+older; an http source was refused; checking a real https URL that isn't a loadout ended in a clear message.

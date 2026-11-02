@@ -157,6 +157,7 @@ pub struct Loadout {
     #[serde(default)] pub tags: Vec<String>,          // suggest this loadout for matching stacks
     #[serde(default)] pub preferred_agent: Option<String>, // "pi", "claude-code", "cursor", …
     #[serde(default)] pub version: Option<String>,    // for team/shared loadouts
+    #[serde(default)] pub source: Option<String>,     // https URL the team publishes it at
 }
 
 pub struct Settings {

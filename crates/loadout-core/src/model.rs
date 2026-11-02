@@ -60,6 +60,9 @@ pub struct Loadout {
     /// For shared team loadouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Where a team loadout is published: an https URL to its `.loadout.json`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

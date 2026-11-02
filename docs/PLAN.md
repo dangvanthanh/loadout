@@ -166,7 +166,7 @@ From a loadout row or keyboard: show missing / extra / present skills for the cu
 
 ## M5 — Team, digest, polish and release
 
-### [ ] T5.1 Shared team loadouts with versioning (U10)
+### [x] T5.1 Shared team loadouts with versioning (U10) (2026-11-01)
 Version field, optional source/signature, import of versioned snapshots. Still installs via official CLI.
 **Accept:** a versioned loadout file imports cleanly and records version in provenance/settings.
 

@@ -212,7 +212,8 @@ mod tests {
             favorite_ids: vec![state.favorites[0].id],
             tags: vec!["nextjs".into()],
             preferred_agent: Some("pi".into()),
-            version: None,
+            version: Some("1.2".into()),
+            source: Some("https://example.com/web.loadout.json".into()),
         });
         state.provenance.push(ProvenanceEntry {
             id: Uuid::new_v4(),
