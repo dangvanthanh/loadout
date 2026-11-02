@@ -15,9 +15,9 @@ actions!(loadout, [Quit]);
 
 /// How often hotkey and menu bar clicks are drained; cheap and never redraws.
 const HOTKEY_POLL: Duration = Duration::from_millis(50);
-/// Background update checks, like the prototype: shortly after launch, then every 6 hours.
+/// Background checks (updates, digest): shortly after launch, then whatever is due each hour.
 const FIRST_CHECK: Duration = Duration::from_secs(3);
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
+const TICK: Duration = Duration::from_secs(3600);
 
 fn main() {
     let app = gpui_kit::application().with_assets(assets::AppAssets);
@@ -37,12 +37,8 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(FIRST_CHECK).await;
             loop {
-                state.update(cx, |state, cx| {
-                    if state.data.settings.auto_check {
-                        state.check_for_updates(true, cx);
-                    }
-                });
-                cx.background_executor().timer(CHECK_EVERY).await;
+                state.update(cx, |state, cx| state.tick(cx));
+                cx.background_executor().timer(TICK).await;
             }
         })
         .detach();

@@ -14,7 +14,8 @@ use loadout_core::share::SharedLoadout;
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
 use loadout_core::{
-    agents, launch, loadout_diff, parser, project, provenance, share, storage, tags, ui_skills,
+    agents, digest, launch, loadout_diff, parser, project, provenance, share, storage, tags,
+    ui_skills,
 };
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
@@ -90,6 +91,18 @@ pub struct AppState {
 }
 
 const LOG_LINES: usize = 2000;
+/// Background update checks, like the prototype: every 6 hours.
+const AUTO_CHECK_HOURS: u32 = 6;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckReason {
+    /// ↻: no notification.
+    Manual,
+    /// The 6-hourly check: notifies new versions, unless the digest is on.
+    Auto,
+    /// The digest: one summary of everything pending.
+    Digest,
+}
 
 pub enum Scan {
     Loading,
@@ -1078,13 +1091,17 @@ impl AppState {
 
     /// Fetches the latest versions of installed skills (one GitHub request per repo, off the
     /// main thread). With `notify`, posts one notification for versions not announced before.
-    pub fn check_for_updates(&mut self, notify: bool, cx: &mut Context<Self>) {
+    pub fn check_for_updates(&mut self, reason: CheckReason, cx: &mut Context<Self>) {
         if self.checking {
             return;
         }
         let tracked = self.data.tracked_favorites();
         if tracked.is_empty() {
             self.last_checked = Some(provenance::now());
+            if reason == CheckReason::Digest {
+                self.data.last_digest = self.last_checked;
+                self.save();
+            }
             cx.notify();
             return;
         }
@@ -1105,12 +1122,18 @@ impl AppState {
                 this.trees.extend(result.trees);
                 let pending = this.pending();
                 let fresh = this.data.take_unnotified(&pending);
-                if !fresh.is_empty() {
-                    this.save();
-                    if notify {
-                        this.notify_updates(&fresh, cx);
+                let digest = this.data.settings.digest_enabled;
+                match reason {
+                    // With the digest on, it's the only notification.
+                    CheckReason::Auto if !digest => this.notify_updates(&fresh, "updates", cx),
+                    CheckReason::Digest => {
+                        let all: Vec<Uuid> = pending.iter().map(|p| p.favorite).collect();
+                        this.notify_updates(&all, "digest", cx);
+                        this.data.last_digest = this.last_checked;
                     }
+                    _ => {}
                 }
+                this.save();
                 this.refresh_badge(cx);
                 cx.notify();
             })
@@ -1118,19 +1141,18 @@ impl AppState {
         }));
     }
 
-    fn notify_updates(&self, fresh: &[Uuid], cx: &mut App) {
-        let names: Vec<&str> = fresh
+    /// One notification naming `ids`' skills; nothing when empty.
+    fn notify_updates(&self, ids: &[Uuid], tag: &'static str, cx: &mut App) {
+        let names: Vec<&str> = ids
             .iter()
             .filter_map(|id| self.data.favorites.iter().find(|f| f.id == *id))
             .map(|f| f.name.as_str())
             .collect();
-        let Some(first) = names.first() else { return };
-        let body = match names.len() {
-            1 => format!("{first} can be updated."),
-            n => format!("{first} and {} more can be updated.", n - 1),
+        let Some(body) = digest::body(&names) else {
+            return;
         };
         cx.show_system_notification(SystemNotification {
-            tag: "updates".into(),
+            tag: tag.into(),
             title: "Skill updates available".into(),
             body: body.into(),
             actions: Vec::new(),
@@ -1266,6 +1288,33 @@ impl AppState {
             .iter()
             .find(|f| f.id == favorite)
             .map_or_else(String::new, |f| f.name.clone())
+    }
+
+    /// Runs whatever background check is due: the digest (when on) or the 6-hourly check.
+    /// Called hourly; cheap when nothing is due.
+    pub fn tick(&mut self, cx: &mut Context<Self>) {
+        let now = provenance::now();
+        let settings = &self.data.settings;
+        if settings.digest_enabled
+            && digest::due(self.data.last_digest, settings.digest_interval_hours, now)
+        {
+            self.check_for_updates(CheckReason::Digest, cx);
+        } else if settings.auto_check && digest::due(self.last_checked, AUTO_CHECK_HOURS, now) {
+            self.check_for_updates(CheckReason::Auto, cx);
+        }
+    }
+
+    /// `None` turns the digest off; otherwise the interval in hours.
+    pub fn set_digest(&mut self, interval: Option<u32>, cx: &mut Context<Self>) {
+        let settings = &mut self.data.settings;
+        settings.digest_enabled = interval.is_some();
+        if let Some(hours) = interval {
+            settings.digest_interval_hours = hours;
+            // Start counting from now rather than firing straight away.
+            self.data.last_digest.get_or_insert(provenance::now());
+        }
+        self.save();
+        cx.notify();
     }
 
     pub fn set_launch_after_install(&mut self, on: bool, cx: &mut Context<Self>) {

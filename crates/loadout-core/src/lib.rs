@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod context;
 pub mod diff;
+pub mod digest;
 pub mod installed;
 pub mod installer;
 pub mod launch;

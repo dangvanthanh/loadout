@@ -140,6 +140,9 @@ pub struct SavedState {
     pub provenance: Vec<ProvenanceEntry>,
     /// Pin / ignore / notified, keyed by `skill_key`.
     pub skill_state: BTreeMap<String, SkillState>,
+    /// When the last digest ran (unix seconds), whether or not it notified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_digest: Option<u64>,
 }
 
 /// Choices about one skill's updates.

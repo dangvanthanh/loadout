@@ -170,7 +170,7 @@ From a loadout row or keyboard: show missing / extra / present skills for the cu
 Version field, optional source/signature, import of versioned snapshots. Still installs via official CLI.
 **Accept:** a versioned loadout file imports cleanly and records version in provenance/settings.
 
-### [ ] T5.2 Idle “what changed” digest (U11)
+### [x] T5.2 Idle “what changed” digest (U11) (2026-11-01)
 Quiet daily/weekly summary notification when real updates exist. Setting to enable/disable and set interval.
 **Accept:** with updates pending, a single calm digest appears; no spam.
 

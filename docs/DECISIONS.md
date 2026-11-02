@@ -393,3 +393,14 @@ validated; nothing installs without the palette and the safety glance. Checks ar
 update check.
 **Verified:** a v1.2 file imported with its version and source and appeared in History; a v1.1 file previewed as
 older; an http source was refused; checking a real https URL that isn't a loadout ended in a clear message.
+
+## 043 — The digest replaces per-version notifications
+**Choice:** ⚙ → Update digest: Off / Daily / Weekly (`digestEnabled`, `digestIntervalHours`). One hourly tick
+replaces the 6-hour loop: if the digest is on and due (`lastDigest` + interval), it checks GitHub and posts one
+notification naming what's pending ("frontend-design, tdd, and 2 more can be updated."), or nothing if nothing is.
+Either way it records `lastDigest`, so there's at most one per interval. Otherwise the plain 6-hourly check runs
+when automatic checks are on. With the digest on, those checks stay silent: the digest is the only notification.
+Turning it on starts counting from that moment rather than firing at once. No `macos/notify.rs`: GPUI posts.
+**Verified:** with a stale install and the digest due, one check ran, `lastDigest` was saved, and the summary read
+"frontend-design can be updated."; an immediate second tick did nothing. The notification itself only appears in
+the bundled app.

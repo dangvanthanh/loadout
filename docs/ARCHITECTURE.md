@@ -74,6 +74,7 @@ loadout/
       loadout_diff.rs             missing / extra skills vs a loadout                     (U7)
       share.rs                    loadout:// links, .loadout.json, team versioning        (U5, U10)
       provenance.rs               append-only local audit log                             (U8)
+      digest.rs                   when the digest is due, and its one-line summary        (U11)
       launch.rs                   preferred-agent launch helpers                          (U9)
     loadout-core/tests/fixtures/  projects/, trees/, html/, data/
     loadout/src/
@@ -93,7 +94,6 @@ loadout/
         settings.rs
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
-        notify.rs                 digest scheduling (T5.2); posting uses GPUI's show_system_notification
         login_item.rs             SMAppService
         url_scheme.rs             loadout:// and opened-file events, drained by the main poll loop
         launch.rs                 open agent via URL scheme / CLI
@@ -194,6 +194,7 @@ pub struct SavedState {
     pub installed: BTreeMap<String, String>,     // prototype key: "<project id|global>|<favorite id>" → version
     pub skill_state: BTreeMap<String, SkillState>, // key = source or source@skill: pinned, ignoredVersion, notifiedVersion
     #[serde(default)] pub provenance: Vec<ProvenanceEntry>,
+    #[serde(default)] pub last_digest: Option<u64>,     // "lastDigest": when the digest last ran
     // keep append-only; trim old entries in a later polish task if needed
 }
 ```

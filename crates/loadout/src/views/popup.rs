@@ -7,11 +7,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::diff::{ChangeKind, LineKind};
 use loadout_core::model::{ProvenanceEntry, Uuid};
-use loadout_core::{provenance, share};
+use loadout_core::{digest, provenance, share};
 
 use crate::Quit;
 use crate::macos::login_item::LoginItem;
-use crate::state::{AppState, ChangesState};
+use crate::state::{AppState, ChangesState, CheckReason};
 use crate::views::palette::update_pill;
 use crate::windows;
 
@@ -988,6 +988,19 @@ impl Popup {
     }
 }
 
+/// A digest choice in the ⚙ menu, checked when it's the current one.
+fn digest_item(
+    label: &'static str,
+    interval: Option<u32>,
+    current: Option<u32>,
+    state: &Entity<AppState>,
+) -> PopupMenuItem {
+    let state = state.clone();
+    PopupMenuItem::new(label)
+        .checked(interval == current)
+        .on_click(move |_, _, cx| state.update(cx, |s, cx| s.set_digest(interval, cx)))
+}
+
 #[derive(Clone, Copy)]
 enum LoadoutAction {
     Edit(Field),
@@ -1027,6 +1040,12 @@ impl Render for Popup {
         let login_on = state.login_item != LoginItem::Off;
         let auto_check = state.data.settings.auto_check;
         let launch_after = state.data.settings.launch_after_install;
+        // `None` = off, else the interval in hours.
+        let digest = state
+            .data
+            .settings
+            .digest_enabled
+            .then_some(state.data.settings.digest_interval_hours);
         let checking = state.checking;
         let check_status = state.check_status();
         let pending = state.pending().len();
@@ -1151,7 +1170,9 @@ impl Render for Popup {
                             .on_click({
                                 let state = self.state.clone();
                                 move |_, _, cx| {
-                                    state.update(cx, |state, cx| state.check_for_updates(false, cx))
+                                    state.update(cx, |state, cx| {
+                                        state.check_for_updates(CheckReason::Manual, cx)
+                                    })
                                 }
                             }),
                     )
@@ -1195,6 +1216,12 @@ impl Render for Popup {
                                     .item(item("Check for updates automatically").checked(auto_check).on_click(
                                         move |_, _, cx| s1.update(cx, |s, cx| s.set_auto_check(!auto_check, cx)),
                                     ))
+                                    .separator()
+                                    .label("Update digest")
+                                    .item(digest_item("Off", None, digest, &state))
+                                    .item(digest_item("Daily", Some(digest::DAILY), digest, &state))
+                                    .item(digest_item("Weekly", Some(digest::WEEKLY), digest, &state))
+                                    .separator()
                                     .item(item("Open agent after installing").checked(launch_after).on_click(
                                         move |_, _, cx| s4.update(cx, |s, cx| s.set_launch_after_install(!launch_after, cx)),
                                     ))
