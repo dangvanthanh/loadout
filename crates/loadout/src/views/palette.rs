@@ -107,6 +107,8 @@ pub struct Palette {
     diff_selected: HashSet<Uuid>,
     /// Index into the diff's missing skills.
     diff_highlight: usize,
+    /// The project chooser (⌘P) shows in the list area; index into `target_choices`.
+    choosing: Option<usize>,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -168,6 +170,7 @@ impl Palette {
             diff: None,
             diff_selected: HashSet::new(),
             diff_highlight: 0,
+            choosing: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         };
@@ -397,6 +400,40 @@ impl Palette {
         true
     }
 
+    /// Recent projects, then Global (`None`).
+    fn target_choices(&self, cx: &App) -> Vec<Option<std::path::PathBuf>> {
+        let mut choices: Vec<_> = self
+            .state
+            .read(cx)
+            .recent_projects()
+            .into_iter()
+            .take(9)
+            .map(Some)
+            .collect();
+        choices.push(None);
+        choices
+    }
+
+    /// Keys while the chooser shows: move, pick, close.
+    fn choose_key(&mut self, ix: usize, key: &str, cx: &mut Context<Self>) -> bool {
+        let choices = self.target_choices(cx);
+        match key {
+            "escape" => self.choosing = None,
+            "up" => self.choosing = Some(ix.saturating_sub(1)),
+            "down" => self.choosing = Some((ix + 1).min(choices.len() - 1)),
+            "enter" => {
+                self.choosing = None;
+                let choice = choices.get(ix).cloned().flatten();
+                self.state
+                    .update(cx, |state, cx| state.choose_target(choice, cx));
+            }
+            _ => return false,
+        }
+        self.scroll = ScrollHandle::new();
+        cx.notify();
+        true
+    }
+
     /// ⌘S: name the selection as a loadout, typed in place of the search.
     fn start_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.chosen(cx).is_empty() {
@@ -465,6 +502,24 @@ impl Palette {
         if modifiers.platform && key == "s" {
             self.start_naming(window, cx);
             cx.stop_propagation();
+            return;
+        }
+        // ⌘P picks where installs go; again closes the chooser.
+        if modifiers.platform && key == "p" {
+            self.choosing = match self.choosing {
+                Some(_) => None,
+                None => Some(0),
+            };
+            self.preview = None;
+            self.diff = None;
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
+        if let Some(ix) = self.choosing {
+            if !modifiers.platform && self.choose_key(ix, key, cx) {
+                cx.stop_propagation();
+            }
             return;
         }
         // ⌘D compares the project with the highlighted loadout (U7); again goes back.
@@ -639,6 +694,92 @@ impl Palette {
 }
 
 impl Palette {
+    /// "Install into": recent projects and Global.
+    fn render_chooser(&self, highlight: usize, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let state = self.state.read(cx);
+        let global = state.data.settings.global;
+        let current = state.target.root.clone();
+        let choices = self.target_choices(cx);
+        let theme = cx.theme();
+        let mut items = vec![
+            div()
+                .h(LABEL_HEIGHT)
+                .px_2()
+                .flex()
+                .items_center()
+                .text_size(px(11.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.muted_foreground)
+                .child("Install into")
+                .into_any_element(),
+        ];
+        for (ix, choice) in choices.into_iter().enumerate() {
+            let theme = cx.theme();
+            let hover = theme.list_hover;
+            let is_current = match &choice {
+                None => global,
+                Some(path) => !global && current.as_ref() == Some(path),
+            };
+            let (name, detail) = match &choice {
+                None => (
+                    "Global".to_string(),
+                    "home folder, every project".to_string(),
+                ),
+                Some(path) => (
+                    path.file_name().map_or_else(
+                        || path.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    ),
+                    path.display().to_string(),
+                ),
+            };
+            items.push(
+                div()
+                    .id(("choice", ix))
+                    .h(ROW_HEIGHT)
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(6.))
+                    .when(ix == highlight, |row| row.bg(theme.list_active))
+                    .when(ix != highlight, |row| row.hover(move |s| s.bg(hover)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_key(ix, "enter", cx);
+                    }))
+                    .child(
+                        Icon::new(IconName::Folder)
+                            .small()
+                            .text_color(theme.muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(name),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .max_w(px(260.))
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(theme.muted_foreground)
+                            .child(detail),
+                    )
+                    .when(is_current, |row| {
+                        row.child(
+                            Icon::new(IconName::Check)
+                                .small()
+                                .text_color(theme.muted_foreground),
+                        )
+                    })
+                    .into_any_element(),
+            );
+        }
+        items
+    }
+
     /// "Missing vs Web app (3)" rows to select, then installed ones and extras, muted.
     fn render_diff(&self, loadout: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let state = self.state.read(cx);
@@ -854,6 +995,7 @@ impl Render for Palette {
         let entries = self.entries(&visible);
         let stack_label = self.state.read(cx).stack_summary();
         let rows: Vec<AnyElement> = match (self.diff, self.preview) {
+            _ if self.choosing.is_some() => self.render_chooser(self.choosing.unwrap_or(0), cx),
             (Some(loadout), _) => self.render_diff(loadout, cx),
             (None, Some(id)) => self.render_preview(id, cx),
             (None, None) => entries
@@ -952,7 +1094,12 @@ impl Render for Palette {
                         )
                     }),
             )
-            .child(into_line(&self.state.read(cx).target, &stack_label, cx))
+            .child(into_line(
+                &self.state.read(cx).target,
+                self.state.read(cx).data.settings.global,
+                &stack_label,
+                cx,
+            ))
             .child(div().h(px(1.)).bg(theme.border))
             .child(
                 div()
@@ -1024,6 +1171,8 @@ impl Render for Palette {
                     .child(div().flex_1())
                     .child(if self.naming {
                         "esc cancel"
+                    } else if self.choosing.is_some() {
+                        "↑↓ move · ↩ pick · esc back"
                     } else if self.diff.is_some() {
                         "↑↓ move · space select · esc back"
                     } else if self.preview.is_some() {
@@ -1031,7 +1180,7 @@ impl Render for Palette {
                     } else if loadout_highlighted {
                         "↑↓ move · space select · ⌘D diff · esc close"
                     } else {
-                        "↑↓ move · space select · ⌘S save as loadout · esc close"
+                        "↑↓ move · space select · ⌘S save · ⌘P project · esc close"
                     }),
             )
     }
@@ -1116,14 +1265,23 @@ fn section_label(section: Section, stack_label: &str, cx: &App) -> AnyElement {
 }
 
 /// "Into: shop-dashboard · Next.js, Tailwind        from Zed" — where Return will install.
-fn into_line(target: &Target, stack_label: &str, cx: &App) -> impl IntoElement {
+fn into_line(target: &Target, global: bool, stack_label: &str, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
-    let name = target
-        .root
-        .as_ref()
-        .and_then(|root| root.file_name())
-        .map(|name| name.to_string_lossy().into_owned());
-    let trailing: Option<SharedString> = if target.detecting {
+    let name = if global {
+        Some("Global".to_string())
+    } else {
+        target
+            .root
+            .as_ref()
+            .and_then(|root| root.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+    };
+    let stack_label = if global { "" } else { stack_label };
+    let trailing: Option<SharedString> = if global {
+        Some("home folder · ⌘P to change".into())
+    } else if target.chosen {
+        Some("chosen · ⌘P to change".into())
+    } else if target.detecting {
         None
     } else if let Some(notice) = &target.notice {
         Some(notice.clone())

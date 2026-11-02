@@ -34,10 +34,11 @@ fn main() {
         let state = cx.new(|_| state::AppState::new());
         cx.set_global(state::GlobalAppState(state.clone()));
         cx.on_system_notification_response(|_, cx| windows::show_popup(cx));
+        let ticker = state.clone();
         cx.spawn(async move |cx| {
             cx.background_executor().timer(FIRST_CHECK).await;
             loop {
-                state.update(cx, |state, cx| state.tick(cx));
+                ticker.update(cx, |state, cx| state.tick(cx));
                 cx.background_executor().timer(TICK).await;
             }
         })
@@ -46,11 +47,20 @@ fn main() {
         // Startup invariants: without the menu bar item and hotkey, Loadout is unreachable.
         let mtm = objc2::MainThreadMarker::new().expect("main thread");
         cx.set_global(tray::Tray::new(mtm).expect("create menu bar item"));
-        let hotkey = hotkey::Hotkey::register(hotkey::DEFAULT).expect("register global hotkey");
+        let mut keys = hotkey::Hotkey::new().expect("create the global hotkey manager");
+        let saved = state.read(cx).data.settings.hotkey.clone();
+        if keys.set(&saved).is_err() {
+            keys.set(hotkey::DEFAULT).expect("register global hotkey");
+            state.update(cx, |state, _| {
+                state.popup_notice =
+                    Some(format!("Couldn't use the shortcut {saved}; using ctrl+alt+L.").into())
+            });
+        }
+        cx.set_global(keys);
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor().timer(HOTKEY_POLL).await;
-                if hotkey.pressed() {
+                if cx.update(|cx| cx.global::<hotkey::Hotkey>().pressed()) {
                     cx.update(windows::toggle_palette);
                 }
                 if tray::take_click() {

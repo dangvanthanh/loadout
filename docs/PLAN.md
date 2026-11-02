@@ -174,7 +174,7 @@ Version field, optional source/signature, import of versioned snapshots. Still i
 Quiet daily/weekly summary notification when real updates exist. Setting to enable/disable and set interval.
 **Accept:** with updates pending, a single calm digest appears; no spam.
 
-### [ ] T5.3 Popup parity + settings
+### [x] T5.3 Popup parity + settings (2026-11-01)
 Projects menu, Global target, settings panel (hotkey, agents, digest, launch default, GitHub token).
 **Accept:** all settings persist and affect behavior.
 

@@ -38,6 +38,8 @@ pub struct Target {
     pub installed: Installed,
     /// Open file, git changes, recent files: a ranking boost (U2).
     pub signals: Signals,
+    /// Picked in the project switcher rather than detected.
+    pub chosen: bool,
 }
 
 /// Everything detection learns off the main thread.
@@ -332,7 +334,7 @@ impl AppState {
         };
         self.awaiting = None;
         // The Into line may still show the fallback project; never install there by accident.
-        if self.target.detecting {
+        if self.target.detecting && !self.data.settings.global {
             self.install_status = Some("Finding the project…".into());
             cx.notify();
             return;
@@ -1317,6 +1319,27 @@ impl AppState {
         cx.notify();
     }
 
+    /// The palette shortcut, e.g. "ctrl+alt+L"; applied at once. False if it can't be used.
+    pub fn set_hotkey(&mut self, spec: &str, cx: &mut Context<Self>) -> bool {
+        let result = cx.update_global::<crate::hotkey::Hotkey, _>(|keys, _| keys.set(spec));
+        match result {
+            Ok(()) => {
+                self.data.settings.hotkey = spec.trim().to_string();
+                self.save();
+                cx.notify();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Agents passed with `-a`, e.g. "claude-code, cursor"; empty lets the CLI detect them.
+    pub fn set_agents(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.data.settings.agents = agents::parse_list(text).join(", ");
+        self.save();
+        cx.notify();
+    }
+
     pub fn set_launch_after_install(&mut self, on: bool, cx: &mut Context<Self>) {
         self.data.settings.launch_after_install = on;
         self.save();
@@ -1343,7 +1366,75 @@ impl AppState {
 
     /// Resolves the target for `app` off the main thread; the last project stands in meanwhile.
     pub fn detect_target(&mut self, app: Option<FrontApp>, cx: &mut Context<Self>) {
+        self.resolve_target(app, None, cx);
+    }
+
+    /// The project switcher: `Some(folder)` targets that project, `None` installs globally (`-g`).
+    /// Both persist: the project becomes the last used one; Global stays on until a project is
+    /// picked.
+    pub fn choose_target(&mut self, folder: Option<PathBuf>, cx: &mut Context<Self>) {
+        match folder {
+            None => {
+                self.data.settings.global = true;
+                self.save();
+                cx.notify();
+            }
+            Some(folder) => {
+                self.data.settings.global = false;
+                self.remember_project(&folder);
+                self.resolve_target(None, Some(folder), cx);
+            }
+        }
+    }
+
+    /// Saved projects, most recently used first.
+    pub fn recent_projects(&self) -> Vec<PathBuf> {
+        let mut projects: Vec<_> = self.data.projects.iter().collect();
+        projects.sort_by_key(|p| std::cmp::Reverse(p.last_used));
+        projects.into_iter().map(|p| p.path.clone()).collect()
+    }
+
+    /// Asks for a folder and makes it the target.
+    pub fn add_project(&mut self, cx: &mut Context<Self>) {
+        cx.activate(true);
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add project".into()),
+        });
+        self._share = Some(cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = chosen.await else {
+                return;
+            };
+            let Some(folder) = paths.into_iter().next() else {
+                return;
+            };
+            this.update(cx, |this, cx| this.choose_target(Some(folder), cx))
+                .ok();
+            cx.update(crate::windows::show_popup);
+        }));
+    }
+
+    /// Forgets a project (not its files, records, or history entries).
+    pub fn forget_project(&mut self, folder: &std::path::Path, cx: &mut Context<Self>) {
+        self.data.projects.retain(|p| p.path != folder);
+        if self.target.root.as_deref() == Some(folder) {
+            self.target = Target::default();
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Detects the frontmost app's project, or uses `forced`; off the main thread.
+    fn resolve_target(
+        &mut self,
+        app: Option<FrontApp>,
+        forced: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
         let fallback = self.last_project();
+        let chosen = forced.is_some();
         // A new palette starts without the last one's notice or waiting equip.
         self.safety_notice = None;
         self.awaiting = None;
@@ -1360,11 +1451,19 @@ impl AppState {
         let task = cx.background_executor().spawn({
             let app = app.clone();
             async move {
-                let detection = app
-                    .as_ref()
-                    .map_or(Detection::Unsupported, frontmost::detect);
-                let (root, document) = match &detection {
-                    Detection::Folder { folder, document } => {
+                let detection = match &forced {
+                    Some(folder) => Detection::Folder {
+                        folder: folder.clone(),
+                        document: None,
+                    },
+                    None => app
+                        .as_ref()
+                        .map_or(Detection::Unsupported, frontmost::detect),
+                };
+                let (root, document) = match (&detection, &forced) {
+                    // A picked folder is used as it is.
+                    (_, Some(folder)) => (Some(folder.clone()), None),
+                    (Detection::Folder { folder, document }, None) => {
                         (Some(project::root_for(folder)), document.clone())
                     }
                     _ => (fallback, None),
@@ -1392,6 +1491,7 @@ impl AppState {
             let resolved = task.await;
             this.update(cx, |this, cx| {
                 this.apply_detection(app.as_ref(), resolved);
+                this.target.chosen = chosen;
                 cx.notify();
             })
             .ok();
@@ -1413,7 +1513,7 @@ impl AppState {
         };
         match resolved.detection {
             Detection::Folder { .. } => {
-                self.target.from_app = Some(app_name);
+                self.target.from_app = app.map(|_| app_name.clone());
                 if let Some(root) = self.target.root.clone() {
                     self.remember_project(&root);
                 }

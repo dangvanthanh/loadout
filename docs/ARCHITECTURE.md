@@ -91,7 +91,7 @@ loadout/
         preview.rs                preview + what changed + safety/compat findings
         loadout_diff.rs           missing/extra skills view
         provenance.rs             simple log view
-        settings.rs
+        settings.rs               shortcut, agents, digest, behavior switches (popup's Settings view)
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
         login_item.rs             SMAppService

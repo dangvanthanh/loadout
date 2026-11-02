@@ -7,12 +7,12 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::diff::{ChangeKind, LineKind};
 use loadout_core::model::{ProvenanceEntry, Uuid};
-use loadout_core::{digest, provenance, share};
+use loadout_core::{provenance, share};
 
 use crate::Quit;
-use crate::macos::login_item::LoginItem;
 use crate::state::{AppState, ChangesState, CheckReason};
 use crate::views::palette::update_pill;
+use crate::views::settings::SettingsView;
 use crate::windows;
 
 actions!(popup, [Dismiss]);
@@ -24,6 +24,7 @@ const INPUT_HEIGHT: Pixels = px(30.);
 const NOTICE_HEIGHT: Pixels = px(18.);
 const ROW_HEIGHT: Pixels = px(44.);
 const UPDATE_BAR_HEIGHT: Pixels = px(28.);
+const TARGET_HEIGHT: Pixels = px(24.);
 const FOOTER_HEIGHT: Pixels = px(28.);
 const GAP: Pixels = px(8.);
 const MIN_ROWS: usize = 4;
@@ -42,7 +43,15 @@ pub fn height(favorites: usize, updates: bool) -> Pixels {
     } else {
         px(0.)
     };
-    PADDING * 2. + INPUT_HEIGHT + NOTICE_HEIGHT + list + bar + px(1.) + FOOTER_HEIGHT + GAP * 4.
+    PADDING * 2.
+        + TARGET_HEIGHT
+        + INPUT_HEIGHT
+        + NOTICE_HEIGHT
+        + list
+        + bar
+        + px(1.)
+        + FOOTER_HEIGHT
+        + GAP * 5.
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -69,6 +78,7 @@ enum View {
     Loadouts,
     /// One loadout's skills, toggled by clicking.
     Loadout(Uuid),
+    Settings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,6 +98,8 @@ pub struct Popup {
     edit: Entity<InputState>,
     editing: Option<(Uuid, Field)>,
     view: View,
+    /// Made the first time Settings opens.
+    settings: Option<Entity<SettingsView>>,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -169,6 +181,7 @@ impl Popup {
             edit,
             editing: None,
             view: View::Favorites,
+            settings: None,
             scroll: ScrollHandle::new(),
             _subscriptions,
         }
@@ -513,6 +526,82 @@ impl Popup {
 }
 
 impl Popup {
+    /// "Into: shop-dashboard ⌄": recent projects, Global, Add project…, Forget.
+    fn render_target(&self, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.state.read(cx);
+        let global = state.data.settings.global;
+        let current = (!global)
+            .then(|| {
+                state
+                    .target
+                    .root
+                    .clone()
+                    .or_else(|| state.recent_projects().into_iter().next())
+            })
+            .flatten();
+        let label: SharedString = match (&current, global) {
+            (_, true) => "Into: Global".into(),
+            (Some(path), false) => format!("Into: {}", folder_name(path)).into(),
+            (None, false) => "Into: no project yet".into(),
+        };
+        let projects: Vec<std::path::PathBuf> =
+            state.recent_projects().into_iter().take(10).collect();
+        let entity = self.state.clone();
+        div()
+            .h(TARGET_HEIGHT)
+            .flex()
+            .items_center()
+            .child(
+                Button::new("target")
+                    .ghost()
+                    .xsmall()
+                    .label(label)
+                    .icon(IconName::ChevronDown)
+                    .tooltip("Where installs go")
+                    .dropdown_menu(move |menu, _, _| {
+                        let mut menu = menu;
+                        for path in &projects {
+                            let (state, path) = (entity.clone(), path.clone());
+                            let checked = !global && current.as_ref() == Some(&path);
+                            menu = menu.item(
+                                PopupMenuItem::new(folder_name(&path))
+                                    .checked(checked)
+                                    .on_click(move |_, _, cx| {
+                                        state.update(cx, |s, cx| {
+                                            s.choose_target(Some(path.clone()), cx)
+                                        })
+                                    }),
+                            );
+                        }
+                        let (to_global, adder, forget) =
+                            (entity.clone(), entity.clone(), entity.clone());
+                        let current = current.clone();
+                        menu.separator()
+                            .item(
+                                PopupMenuItem::new("Global (home folder)")
+                                    .checked(global)
+                                    .on_click(move |_, _, cx| {
+                                        to_global.update(cx, |s, cx| s.choose_target(None, cx))
+                                    }),
+                            )
+                            .item(
+                                PopupMenuItem::new("Add project…").on_click(move |_, _, cx| {
+                                    adder.update(cx, |s, cx| s.add_project(cx))
+                                }),
+                            )
+                            .when_some(current, |menu, path| {
+                                menu.item(
+                                    PopupMenuItem::new(format!("Forget {}", folder_name(&path)))
+                                        .on_click(move |_, _, cx| {
+                                            forget.update(cx, |s, cx| s.forget_project(&path, cx))
+                                        }),
+                                )
+                            })
+                    }),
+            )
+            .into_any_element()
+    }
+
     /// A back button and a title, for secondary views.
     fn view_header(&self, title: SharedString, back: View, cx: &mut Context<Self>) -> AnyElement {
         div()
@@ -988,19 +1077,6 @@ impl Popup {
     }
 }
 
-/// A digest choice in the ⚙ menu, checked when it's the current one.
-fn digest_item(
-    label: &'static str,
-    interval: Option<u32>,
-    current: Option<u32>,
-    state: &Entity<AppState>,
-) -> PopupMenuItem {
-    let state = state.clone();
-    PopupMenuItem::new(label)
-        .checked(interval == current)
-        .on_click(move |_, _, cx| state.update(cx, |s, cx| s.set_digest(interval, cx)))
-}
-
 #[derive(Clone, Copy)]
 enum LoadoutAction {
     Edit(Field),
@@ -1020,8 +1096,13 @@ enum RowAction {
 }
 
 impl Render for Popup {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.view == View::Settings && self.settings.is_none() {
+            let state = self.state.clone();
+            self.settings = Some(cx.new(|cx| SettingsView::new(state, window, cx)));
+        }
         let count = self.state.read(cx).data.favorites.len();
+        let target = self.render_target(cx);
         let importing = self.state.read(cx).pending_import.is_some();
         let items: Vec<AnyElement> = if importing {
             self.render_import(cx)
@@ -1033,19 +1114,15 @@ impl Render for Popup {
                 View::History(filter) => self.render_history(filter, cx),
                 View::Loadouts => self.render_loadouts(cx),
                 View::Loadout(id) => self.render_loadout_members(id, cx),
+                View::Settings => {
+                    let mut items = vec![self.view_header("Settings".into(), View::Favorites, cx)];
+                    items.extend(self.settings.clone().map(|view| view.into_any_element()));
+                    items
+                }
             }
         };
         let theme = cx.theme();
         let state = self.state.read(cx);
-        let login_on = state.login_item != LoginItem::Off;
-        let auto_check = state.data.settings.auto_check;
-        let launch_after = state.data.settings.launch_after_install;
-        // `None` = off, else the interval in hours.
-        let digest = state
-            .data
-            .settings
-            .digest_enabled
-            .then_some(state.data.settings.digest_interval_hours);
         let checking = state.checking;
         let check_status = state.check_status();
         let pending = state.pending().len();
@@ -1073,6 +1150,7 @@ impl Render for Popup {
             .bg(theme.background)
             .text_color(theme.foreground)
             .text_size(px(13.))
+            .child(target)
             .child(
                 div()
                     .h(INPUT_HEIGHT)
@@ -1187,57 +1265,36 @@ impl Render for Popup {
                                 let this = cx.entity().downgrade();
                                 move |menu, _, _| {
                                     let item = |label: &'static str| PopupMenuItem::new(label);
-                                    let (this, history, loadouts) = (this.clone(), this.clone(), this.clone());
+                                    let view = |label: &'static str, view: View| {
+                                        let this = this.clone();
+                                        item(label).on_click(move |_, _, cx| {
+                                            this.update(cx, |this, cx| this.set_view(view, cx)).ok();
+                                        })
+                                    };
                                     let importer = state.clone();
-                                    let (s1, s2, s3, s4) =
-                                        (state.clone(), state.clone(), state.clone(), state.clone());
-                                    menu.item(item("Loadouts").on_click(move |_, _, cx| {
-                                        loadouts
-                                            .update(cx, |this, cx| this.set_view(View::Loadouts, cx))
-                                            .ok();
-                                    }))
-                                    .item(item("Import loadout file…").on_click(move |_, _, cx| {
-                                        importer.update(cx, |s, cx| s.import_file(cx))
-                                    }))
-                                    .when(has_history, |menu| {
-                                        menu.item(item("History").on_click(move |_, _, cx| {
-                                            history
-                                                .update(cx, |this, cx| {
-                                                    this.set_view(View::History(HistoryFilter::All), cx)
-                                                })
-                                                .ok();
+                                    menu.item(view("Loadouts", View::Loadouts))
+                                        .item(item("Import loadout file…").on_click(move |_, _, cx| {
+                                            importer.update(cx, |s, cx| s.import_file(cx))
                                         }))
-                                    })
-                                    .when(has_log, |menu| {
-                                        menu.item(item("Output").on_click(move |_, _, cx| {
-                                            this.update(cx, |this, cx| this.set_view(View::Output, cx)).ok();
+                                        .when(has_history, |menu| {
+                                            menu.item(view("History", View::History(HistoryFilter::All)))
+                                        })
+                                        .when(has_log, |menu| menu.item(view("Output", View::Output)))
+                                        .separator()
+                                        .item(view("Settings…", View::Settings))
+                                        .item(item("Quit Loadout").on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(Quit), cx)
                                         }))
-                                    })
-                                    .item(item("Check for updates automatically").checked(auto_check).on_click(
-                                        move |_, _, cx| s1.update(cx, |s, cx| s.set_auto_check(!auto_check, cx)),
-                                    ))
-                                    .separator()
-                                    .label("Update digest")
-                                    .item(digest_item("Off", None, digest, &state))
-                                    .item(digest_item("Daily", Some(digest::DAILY), digest, &state))
-                                    .item(digest_item("Weekly", Some(digest::WEEKLY), digest, &state))
-                                    .separator()
-                                    .item(item("Open agent after installing").checked(launch_after).on_click(
-                                        move |_, _, cx| s4.update(cx, |s, cx| s.set_launch_after_install(!launch_after, cx)),
-                                    ))
-                                    .item(item("Open at login").checked(login_on).on_click(
-                                        move |_, _, cx| s2.update(cx, |s, cx| s.set_open_at_login(!login_on, cx)),
-                                    ))
-                                    .item(item("Send test notification").on_click(move |_, _, cx| {
-                                        s3.update(cx, |s, cx| s.send_test_notification(cx))
-                                    }))
-                                    .separator()
-                                    .item(item("Quit Loadout").on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(Quit), cx)
-                                    }))
                                 }
                             }),
                     ),
             )
     }
+}
+
+fn folder_name(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }

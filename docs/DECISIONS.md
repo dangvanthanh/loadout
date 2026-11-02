@@ -404,3 +404,20 @@ Turning it on starts counting from that moment rather than firing at once. No `m
 **Verified:** with a stale install and the digest due, one check ran, `lastDigest` was saved, and the summary read
 "frontend-design can be updated."; an immediate second tick did nothing. The notification itself only appears in
 the bundled app.
+
+## 044 — Where installs go, and the settings view
+**Choice:** The popup's top row ("Into: shop-dashboard ⌄") lists recent projects, Global (home folder), Add
+project… (folder picker), and Forget <project>. ⌘P in the palette shows the same choice in the list area. Picking
+a project targets it at once (its stack, installed skills, and context are re-read) and marks it "chosen" on the
+Into line. Global is the prototype's persistent `global` setting: installs use `-g` until a project is picked
+again, and the Into line says "Global · home folder". Return doesn't wait for detection while Global is on.
+**Settings** (⚙ → Settings…, `views/settings.rs`): palette shortcut (global-hotkey format such as `ctrl+alt+L`;
+applied live: the new one is registered before the old one is released, so a bad or taken shortcut leaves the old
+one working and shows why), agents (`-a` list, normalised, with the names it resolves to), update digest (Off /
+Daily / Weekly), automatic checks, open agent after installing, open at login, and a test notification. Text
+fields save on Return or blur. The ⚙ menu is now Loadouts, Import loadout file…, History, Output, Settings…, Quit.
+**Fixed:** startup ignored the saved `settings.hotkey` and always registered ⌃⌥L. It now uses the saved one and
+falls back to ⌃⌥L with a notice.
+**Verified:** a saved custom shortcut registered at startup; a malformed one was refused and a new one applied and
+saved; agents normalised to "codex, cursor"; picking a Vue project targeted it as "chosen"; Global persisted; the
+Settings view and the ⌘P chooser rendered.
