@@ -95,7 +95,7 @@ loadout/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
         notify.rs                 digest scheduling (T5.2); posting uses GPUI's show_system_notification
         login_item.rs             SMAppService
-        url_scheme.rs             loadout:// and .loadout.json open events
+        url_scheme.rs             loadout:// and opened-file events, drained by the main poll loop
         launch.rs                 open agent via URL scheme / CLI
     loadout/assets/           tray/menubar@2x.png (template), icons/ only if GPUI Kit's set lacks one
   packaging/

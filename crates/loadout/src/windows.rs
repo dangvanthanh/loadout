@@ -102,6 +102,13 @@ pub fn toggle_popup(cx: &mut App) {
     }
 }
 
+/// Shows an import preview for a link or file in the popup.
+pub fn offer_import(text: &str, cx: &mut App) {
+    let state = cx.global::<GlobalAppState>().0.clone();
+    state.update(cx, |state, cx| state.offer_import(text, cx));
+    show_popup(cx);
+}
+
 /// Opens the popup unless it's already open (e.g. from a notification).
 pub fn show_popup(cx: &mut App) {
     let open = cx

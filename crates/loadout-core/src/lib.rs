@@ -12,6 +12,7 @@ pub mod parser;
 pub mod project;
 pub mod provenance;
 pub mod safety;
+pub mod share;
 pub mod stack;
 pub mod storage;
 pub mod tags;

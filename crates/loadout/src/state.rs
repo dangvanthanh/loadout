@@ -10,10 +10,11 @@ use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
 use loadout_core::model::{Added, Favorite, Pending, ProvenanceEntry, SavedState, Uuid};
 use loadout_core::safety::{self, Report};
+use loadout_core::share::SharedLoadout;
 use loadout_core::stack::{self, StackTag};
 use loadout_core::updates::{self, Repo, Tree};
 use loadout_core::{
-    agents, launch, loadout_diff, parser, project, provenance, storage, tags, ui_skills,
+    agents, launch, loadout_diff, parser, project, provenance, share, storage, tags, ui_skills,
 };
 
 use crate::macos::frontmost::{self, Detection, FrontApp};
@@ -77,6 +78,9 @@ pub struct AppState {
     /// An equip waiting for its scans (ids, launch); it runs or shows the notice when they land.
     awaiting: Option<(Vec<Uuid>, bool)>,
     _launch: Option<Task<()>>,
+    /// A loadout from a link or file, waiting for Import in the popup.
+    pub pending_import: Option<SharedLoadout>,
+    _share: Option<Task<()>>,
     _scans: Vec<Task<()>>,
     _detect: Option<Task<()>>,
     _changes: Option<Task<()>>,
@@ -203,6 +207,8 @@ impl AppState {
             safety_notice: None,
             awaiting: None,
             _launch: None,
+            pending_import: None,
+            _share: None,
             _scans: Vec::new(),
             _detect: None,
             _changes: None,
@@ -891,6 +897,106 @@ impl AppState {
         })
     }
 
+    /// Validates a shared loadout and holds it for the popup's import preview.
+    pub fn offer_import(&mut self, text: &str, cx: &mut Context<Self>) {
+        match share::parse(text) {
+            Ok(shared) => {
+                self.pending_import = Some(shared);
+                self.popup_notice = None;
+            }
+            Err(err) => self.popup_notice = Some(err.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    /// Adds the pending loadout and the favorites it needs. Nothing is installed.
+    pub fn confirm_import(&mut self, cx: &mut Context<Self>) {
+        let Some(shared) = self.pending_import.take() else {
+            return;
+        };
+        let imported = share::import(&mut self.data, &shared);
+        let skills = match imported.new_favorites {
+            0 => String::new(),
+            1 => " and 1 new favorite".into(),
+            n => format!(" and {n} new favorites"),
+        };
+        let verb = if imported.replaced {
+            "Updated"
+        } else {
+            "Imported"
+        };
+        self.popup_notice = Some(format!("{verb} {}{skills}", imported.name).into());
+        self.save();
+        cx.notify();
+    }
+
+    pub fn cancel_import(&mut self, cx: &mut Context<Self>) {
+        self.pending_import = None;
+        cx.notify();
+    }
+
+    /// Copies a `loadout://` link to `id`.
+    pub fn copy_loadout_link(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        let Some(shared) = share::export(&self.data, id) else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(share::to_link(&shared)));
+        self.popup_notice = Some(format!("Copied a link to {}", shared.name).into());
+        cx.notify();
+    }
+
+    /// Asks where to save `<name>.loadout.json`, writes it, and shows it in Finder.
+    pub fn save_loadout_file(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        let Some(shared) = share::export(&self.data, id) else {
+            return;
+        };
+        let file_name = format!("{}.loadout.json", slug(&shared.name));
+        let folder = dirs_home().map(|h| h.join("Downloads")).unwrap_or_default();
+        // An accessory app must come forward for the save panel to show.
+        cx.activate(true);
+        let chosen = cx.prompt_for_new_path(&folder, Some(&file_name));
+        self._share = Some(cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = chosen.await else {
+                return;
+            };
+            let written = std::fs::write(&path, share::to_json(&shared));
+            this.update(cx, |this, cx| {
+                this.popup_notice = Some(match written {
+                    Ok(()) => {
+                        cx.reveal_path(&path);
+                        format!(
+                            "Saved {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        )
+                        .into()
+                    }
+                    Err(err) => format!("Couldn't save the file: {err}").into(),
+                });
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Asks for a `.loadout.json` and previews it in the popup.
+    pub fn import_file(&mut self, cx: &mut Context<Self>) {
+        cx.activate(true);
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import".into()),
+        });
+        self._share = Some(cx.spawn(async move |_, cx| {
+            let Ok(Ok(Some(paths))) = chosen.await else {
+                return;
+            };
+            let Some(path) = paths.first() else { return };
+            let text = mac::url_scheme::read_small(path).unwrap_or_default();
+            cx.update(|cx| crate::windows::offer_import(&text, cx));
+        }));
+    }
+
     /// "4 skills · prefers Pi" for loadout rows.
     pub fn loadout_subtitle(&self, id: Uuid) -> String {
         let count = self.data.loadout_favorites(id).len();
@@ -1255,6 +1361,11 @@ impl AppState {
         if text.is_empty() {
             return;
         }
+        // A pasted loadout link or file contents.
+        if text.starts_with("loadout:") || text.starts_with('{') {
+            self.offer_import(&text, cx);
+            return;
+        }
         if ui_skills::is_ui_skills_url(&text) {
             self.popup_notice = Some("Reading ui-skills.com…".into());
             cx.notify();
@@ -1391,6 +1502,20 @@ fn scan_skills(
         results.push((favorite.id, scan));
     }
     (results, trees)
+}
+
+/// "Web app!" → "web-app", for file names.
+fn slug(name: &str) -> String {
+    let words: Vec<String> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    if words.is_empty() {
+        "loadout".into()
+    } else {
+        words.join("-")
+    }
 }
 
 fn dirs_home() -> Option<PathBuf> {

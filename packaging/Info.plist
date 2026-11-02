@@ -27,6 +27,22 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Loadout reads the folder of the front Finder window so it can install skills into the project you're in.</string>
+    <!-- .loadout.json files: offered under Open With, never the default for JSON. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Loadout file</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.json</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

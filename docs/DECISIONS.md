@@ -361,3 +361,19 @@ straight away. The footer names it: "↩ Apply Web app · ⌘↩ + open Pi".
 ("Goose isn't installed (goose wasn't found).") after the install summary. The install itself is unaffected.
 **Verified:** applying "Web app" (preferred agent pi, with a custom launcher) installed its skill and ran the launcher
 in a folder whose path has a space; the missing-CLI and missing-app messages showed for goose and Windsurf.
+
+## 041 — Sharing loadouts: one format, previewed before import
+**Choice:** `share.rs` defines `.loadout.json` (`{"loadout": 1, "name", "tags", "preferredAgent", "version",
+"skills": [{"name", "source", "skill", "tags"}]}`). A link is the same JSON, base64url without padding:
+`loadout://import?data=…`. A loadout row's right-click → Copy link / Save file… (save panel, then revealed in
+Finder) exports it. Imports arrive by pasting a link or JSON into the popup's paste field, opening a `loadout://`
+link, Finder's Open With (JSON, Alternate rank, so never the default), or ⚙ → Import loadout file….
+**Trust boundary:** imports come from anyone. `share::parse` rejects anything over 256 KB or 100 skills, newer
+formats, control characters, and any source the paste parser doesn't recognise (no local paths, no commands).
+Unknown agents are dropped and tags normalised. Nothing changes until the popup's preview ("Import Web app? 2
+skills · prefers Pi", with a warning when it replaces an existing loadout of that name) gets Import. Importing adds
+missing favorites (with suggested tags) and creates the loadout or updates the same-named one; it never removes
+anything and never installs. Installing still goes through the palette, the safety glance, and the official CLI.
+**Verified:** on a clean `HOME`, a malformed link only showed a notice; a link and then a file, delivered through
+the AppKit open-URL path, previewed, imported (2 new favorites, agent pi), and re-importing updated the same loadout
+without duplicating favorites.

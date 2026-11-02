@@ -86,7 +86,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - ✅ Create, apply, manage loadouts (including preferred agent)
 - ✅ Diff against loadout
 - ✅ One-shot equip + launch
-- ⬜ Share and import via link or file
+- ✅ Share and import via link or file
 
 ### M5 — Team, digest, polish and release
 - ⬜ Shared team loadouts with versioning (U10)

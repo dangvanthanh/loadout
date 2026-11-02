@@ -210,6 +210,8 @@ impl Popup {
         }
         if self.editing.take().is_some() {
             self.paste.update(cx, |paste, cx| paste.focus(window, cx));
+        } else if self.state.read(cx).pending_import.is_some() {
+            self.state.update(cx, |state, cx| state.cancel_import(cx));
         } else if self.view != View::Favorites {
             self.set_view(View::Favorites, cx);
         } else {
@@ -572,12 +574,18 @@ impl Popup {
             let theme = cx.theme();
             let hover = theme.list_hover;
             let this = cx.entity().downgrade();
-            let menu_item = move |label: &'static str, field: Option<Field>| {
+            let menu_item = move |label: &'static str, action: LoadoutAction| {
                 let this = this.clone();
                 PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                    this.update(cx, |this, cx| match field {
-                        Some(field) => this.start_edit(id, field, window, cx),
-                        None => this
+                    this.update(cx, |this, cx| match action {
+                        LoadoutAction::Edit(field) => this.start_edit(id, field, window, cx),
+                        LoadoutAction::CopyLink => this
+                            .state
+                            .update(cx, |state, cx| state.copy_loadout_link(id, cx)),
+                        LoadoutAction::SaveFile => this
+                            .state
+                            .update(cx, |state, cx| state.save_loadout_file(id, cx)),
+                        LoadoutAction::Remove => this
                             .state
                             .update(cx, |state, cx| state.remove_loadout(id, cx)),
                     })
@@ -635,15 +643,145 @@ impl Popup {
                             }),
                     )
                     .context_menu(move |menu, _, _| {
-                        menu.item(menu_item("Rename…", Some(Field::LoadoutName)))
-                            .item(menu_item("Preferred agent…", Some(Field::LoadoutAgent)))
-                            .item(menu_item("Tags…", Some(Field::LoadoutTags)))
-                            .separator()
-                            .item(menu_item("Remove", None))
+                        menu.item(menu_item(
+                            "Rename…",
+                            LoadoutAction::Edit(Field::LoadoutName),
+                        ))
+                        .item(menu_item(
+                            "Preferred agent…",
+                            LoadoutAction::Edit(Field::LoadoutAgent),
+                        ))
+                        .item(menu_item("Tags…", LoadoutAction::Edit(Field::LoadoutTags)))
+                        .separator()
+                        .item(menu_item("Copy link", LoadoutAction::CopyLink))
+                        .item(menu_item("Save file…", LoadoutAction::SaveFile))
+                        .separator()
+                        .item(menu_item("Remove", LoadoutAction::Remove))
                     })
                     .into_any_element(),
             );
         }
+        items
+    }
+
+    /// What a link or file would add, before anything changes.
+    fn render_import(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let state = self.state.read(cx);
+        let Some(shared) = state.pending_import.as_ref() else {
+            return Vec::new();
+        };
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let replaces = state
+            .data
+            .loadouts
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(&shared.name))
+            .map(|l| l.name.clone());
+        let mut summary = format!(
+            "{} skill{}",
+            shared.skills.len(),
+            if shared.skills.len() == 1 { "" } else { "s" }
+        );
+        if let Some(agent) = &shared.preferred_agent {
+            summary += &format!(" · prefers {}", loadout_core::launch::agent_name(agent));
+        }
+        if let Some(version) = &shared.version {
+            summary += &format!(" · version {version}");
+        }
+        let skills: Vec<(String, String, bool)> = shared
+            .skills
+            .iter()
+            .map(|skill| {
+                let have = state.data.favorites.iter().any(|f| {
+                    f.source.eq_ignore_ascii_case(&skill.source)
+                        && f.skill.as_deref().unwrap_or("") == skill.skill.as_deref().unwrap_or("")
+                });
+                (skill.name.clone(), skill.source.clone(), have)
+            })
+            .collect();
+        let mut items = vec![
+            div()
+                .text_size(px(13.))
+                .font_weight(FontWeight::MEDIUM)
+                .child(format!("Import {}?", shared.name))
+                .into_any_element(),
+            div()
+                .text_size(px(11.))
+                .text_color(muted)
+                .child(summary)
+                .into_any_element(),
+        ];
+        if let Some(name) = replaces {
+            items.push(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.warning)
+                    .child(format!(
+                        "Replaces the skills and agent of your loadout {name}."
+                    ))
+                    .into_any_element(),
+            );
+        }
+        items.push(
+            div()
+                .py_1()
+                .flex()
+                .gap_1()
+                .child(
+                    Button::new("import")
+                        .primary()
+                        .xsmall()
+                        .label("Import")
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, _, cx| state.update(cx, |s, cx| s.confirm_import(cx))
+                        }),
+                )
+                .child(
+                    Button::new("cancel-import")
+                        .ghost()
+                        .xsmall()
+                        .label("Cancel")
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, _, cx| state.update(cx, |s, cx| s.cancel_import(cx))
+                        }),
+                )
+                .into_any_element(),
+        );
+        for (name, source, have) in skills {
+            items.push(
+                div()
+                    .h(px(26.))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_size(px(12.)).truncate().child(name))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .max_w(px(170.))
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(muted)
+                            .child(if have {
+                                format!("{source} · saved")
+                            } else {
+                                source
+                            }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        items.push(
+            div()
+                .pt_1()
+                .text_size(px(11.))
+                .text_color(muted)
+                .child("Nothing is installed now. Apply it from the palette (⌃⌥L).")
+                .into_any_element(),
+        );
         items
     }
 
@@ -799,6 +937,14 @@ impl Popup {
 }
 
 #[derive(Clone, Copy)]
+enum LoadoutAction {
+    Edit(Field),
+    CopyLink,
+    SaveFile,
+    Remove,
+}
+
+#[derive(Clone, Copy)]
 enum RowAction {
     Changes,
     History,
@@ -810,13 +956,18 @@ enum RowAction {
 impl Render for Popup {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.state.read(cx).data.favorites.len();
-        let items: Vec<AnyElement> = match self.view {
-            View::Favorites => (0..count).map(|ix| self.render_favorite(ix, cx)).collect(),
-            View::Output => Vec::new(),
-            View::Changes(id) => self.render_changes(id, cx),
-            View::History(filter) => self.render_history(filter, cx),
-            View::Loadouts => self.render_loadouts(cx),
-            View::Loadout(id) => self.render_loadout_members(id, cx),
+        let importing = self.state.read(cx).pending_import.is_some();
+        let items: Vec<AnyElement> = if importing {
+            self.render_import(cx)
+        } else {
+            match self.view {
+                View::Favorites => (0..count).map(|ix| self.render_favorite(ix, cx)).collect(),
+                View::Output => Vec::new(),
+                View::Changes(id) => self.render_changes(id, cx),
+                View::History(filter) => self.render_history(filter, cx),
+                View::Loadouts => self.render_loadouts(cx),
+                View::Loadout(id) => self.render_loadout_members(id, cx),
+            }
         };
         let theme = cx.theme();
         let state = self.state.read(cx);
@@ -886,14 +1037,14 @@ impl Render for Popup {
                             .text_color(theme.muted_foreground)
                             .children(log.into_iter().map(|line| div().child(line)))
                     })
-                    .when(self.view == View::Favorites && count == 0, |list| {
+                    .when(!importing && self.view == View::Favorites && count == 0, |list| {
                         list.text_size(px(12.))
                             .text_color(theme.muted_foreground)
                             .child("Paste a GitHub or skills.sh link, owner/repo, or an npx skills add command.")
                     })
                     .children(items),
             )
-            .when(pending > 0 && self.view == View::Favorites, |popup| {
+            .when(!importing && pending > 0 && self.view == View::Favorites, |popup| {
                 popup.child(
                     div()
                         .h(UPDATE_BAR_HEIGHT)
@@ -963,12 +1114,16 @@ impl Render for Popup {
                                 move |menu, _, _| {
                                     let item = |label: &'static str| PopupMenuItem::new(label);
                                     let (this, history, loadouts) = (this.clone(), this.clone(), this.clone());
+                                    let importer = state.clone();
                                     let (s1, s2, s3, s4) =
                                         (state.clone(), state.clone(), state.clone(), state.clone());
                                     menu.item(item("Loadouts").on_click(move |_, _, cx| {
                                         loadouts
                                             .update(cx, |this, cx| this.set_view(View::Loadouts, cx))
                                             .ok();
+                                    }))
+                                    .item(item("Import loadout file…").on_click(move |_, _, cx| {
+                                        importer.update(cx, |s, cx| s.import_file(cx))
                                     }))
                                     .when(has_history, |menu| {
                                         menu.item(item("History").on_click(move |_, _, cx| {

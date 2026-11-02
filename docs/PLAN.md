@@ -158,7 +158,7 @@ From a loadout row or keyboard: show missing / extra / present skills for the cu
 ⌘↩ or checkbox: after install/apply, launch the preferred agent (Pi, Cursor, …) via configured command / URL scheme.
 **Accept:** applying a loadout with preferred agent Pi opens Pi (or the configured launcher).
 
-### [ ] T4.4 Share and import
+### [x] T4.4 Share and import (2026-11-01)
 `loadout://` links and `.loadout.json` files. Import applies through the same path.
 **Accept:** export → import on a clean machine brings the loadout across.
 

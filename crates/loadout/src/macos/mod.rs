@@ -3,6 +3,7 @@
 pub mod frontmost;
 pub mod launch;
 pub mod login_item;
+pub mod url_scheme;
 
 use gpui_kit::DisplayId;
 use objc2::MainThreadMarker;
