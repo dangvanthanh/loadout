@@ -413,7 +413,7 @@ Into line. Global is the prototype's persistent `global` setting: installs use `
 again, and the Into line says "Global · home folder". Return doesn't wait for detection while Global is on.
 **Settings** (⚙ → Settings…, `views/settings.rs`): palette shortcut (global-hotkey format such as `ctrl+alt+L`;
 applied live: the new one is registered before the old one is released, so a bad or taken shortcut leaves the old
-one working and shows why), agents (`-a` list, normalised, with the names it resolves to), update digest (Off /
+one working and shows why), agents (`-a` list; a Select since DECISIONS 049), update digest (Off /
 Daily / Weekly), automatic checks, open agent after installing, open at login, and a test notification. Text
 fields save on Return or blur. The ⚙ menu is now Loadouts, Import loadout file…, History, Output, Settings…, Quit.
 **Fixed:** startup ignored the saved `settings.hotkey` and always registered ⌃⌥L. It now uses the saved one and
@@ -493,3 +493,13 @@ order); popup = cancel the edit or import, else go back, else close.
 **Verified:** palette list, ⌘K menu, diff, chooser, and popup were rendered to images in light and dark through
 GPUI's Metal `render_to_image` in a throwaway build (test-support features enabled, close-on-blur off; not
 committed). The glass itself only shows on screen.
+
+## 049 — Agents is a Select
+**Choice:** Settings → Agents is a searchable GPUI Kit `Select` instead of a text field: "Detect automatically"
+(empty `agents`, so the CLI picks), then every agent in `agents.rs`. GPUI Kit's Select picks one item, so choosing
+from it sets a single agent. A list configured some other way (several agents, or an id Loadout doesn't know,
+e.g. the prototype's `claude-code,cursor`) appears as its own entry ("Claude Code, Cursor") and stays selected,
+so opening Settings never drops it. Choosing anything else replaces it. Several agents at once would need GPUI
+Kit's multi-select Combobox; not done, since nobody asked for it.
+**Verified:** rendered the Settings view with `claude-code,cursor` (shown as one entry) and after choosing Pi
+(`agents` saved as `pi`, hint "Installs for Pi.").

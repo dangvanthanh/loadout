@@ -1,18 +1,67 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Sizable};
+use gpui_kit::component::{ActiveTheme, IndexPath, Sizable};
 use gpui_kit::*;
 use loadout_core::{agents, digest};
 
 use crate::macos::login_item::LoginItem;
 use crate::state::AppState;
 
-/// Every setting, saved as soon as it changes (text fields on Return or when they lose focus).
+type AgentSelect = SelectState<SearchableVec<AgentChoice>>;
+
+/// One entry in the Agents select. `value` is what `settings.agents` stores.
+#[derive(Clone)]
+struct AgentChoice {
+    value: String,
+    title: SharedString,
+}
+
+impl SelectItem for AgentChoice {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &String {
+        &self.value
+    }
+}
+
+/// "Detect automatically", then every known agent. A list set elsewhere (several agents, or one
+/// Loadout doesn't know, e.g. from the prototype's data.json) stays as its own choice so opening
+/// Settings never drops it.
+fn agent_choices(current: &str) -> Vec<AgentChoice> {
+    let mut choices = vec![AgentChoice {
+        value: String::new(),
+        title: "Detect automatically".into(),
+    }];
+    let ids = agents::parse_list(current);
+    if ids.len() > 1 || ids.first().is_some_and(|id| agents::find(id).is_none()) {
+        let names: Vec<&str> = ids
+            .iter()
+            .map(|id| agents::find(id).map_or(id.as_str(), |a| a.name))
+            .collect();
+        choices.push(AgentChoice {
+            value: ids.join(", "),
+            title: names.join(", ").into(),
+        });
+    }
+    choices.extend(agents::AGENTS.iter().map(|agent| AgentChoice {
+        value: agent.id.to_string(),
+        title: agent.name.into(),
+    }));
+    choices
+}
+
+/// Every setting, saved as soon as it changes (text fields on Return or when they lose focus,
+/// the agent when it's picked).
 pub struct SettingsView {
     state: Entity<AppState>,
     hotkey: Entity<InputState>,
-    agents: Entity<InputState>,
+    agents: Entity<AgentSelect>,
     token: Entity<InputState>,
     hotkey_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -27,9 +76,13 @@ impl SettingsView {
                 .default_value(settings.hotkey.clone())
         });
         let agent_list = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Let the skills CLI detect agents")
-                .default_value(settings.agents.clone())
+            let choices = agent_choices(&settings.agents);
+            let current = agents::parse_list(&settings.agents).join(", ");
+            let selected = choices
+                .iter()
+                .position(|c| c.value == current)
+                .map(IndexPath::new);
+            SelectState::new(SearchableVec::new(choices), selected, window, cx).searchable(true)
         });
         let token = cx.new(|cx| {
             InputState::new(window, cx)
@@ -60,13 +113,16 @@ impl SettingsView {
                     cx.notify();
                 }
             }),
-            cx.subscribe(&agent_list, |this, input, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                    let text = input.read(cx).value().to_string();
+            cx.subscribe(
+                &agent_list,
+                |this, _, event: &SelectEvent<SearchableVec<AgentChoice>>, cx| {
+                    let SelectEvent::Confirm(Some(value)) = event else {
+                        return;
+                    };
                     this.state
-                        .update(cx, |state, cx| state.set_agents(&text, cx));
-                }
-            }),
+                        .update(cx, |state, cx| state.set_agents(value, cx));
+                },
+            ),
         ];
         Self {
             state,
@@ -149,7 +205,12 @@ impl Render for SettingsView {
                 None => hint("Like ctrl+alt+L or cmd+shift+Space. Return applies it.".into()),
             })
             .child(label("Agents"))
-            .child(Input::new(&self.agents).small())
+            .child(
+                Select::new(&self.agents)
+                    .small()
+                    .search_placeholder("Search agents")
+                    .menu_max_h(px(260.)),
+            )
             .child(hint(agents_hint))
             .child(label("GitHub token"))
             .child(Input::new(&self.token).small().mask_toggle())
