@@ -1,4 +1,4 @@
-//! The Settings window: a sidebar of pages, like Rex's settings (DECISIONS 050). Everything the
+//! The Settings window: a sidebar of pages. Everything the
 //! old menu bar popup managed lives here; the menu bar keeps a small menu.
 
 mod library;
@@ -462,7 +462,7 @@ fn setting(
         .into_any_element()
 }
 
-/// Options in a pill, the chosen one raised (Rex's "Snappy · Natural · Off").
+/// Options in a pill, the chosen one raised.
 fn segmented<T: Copy + PartialEq + 'static>(
     id: &'static str,
     options: &[(T, &'static str)],
@@ -502,7 +502,7 @@ fn segmented<T: Copy + PartialEq + 'static>(
         }))
 }
 
-/// A shortcut shown like a key on a keyboard, Rex-style: a wide gray box.
+/// A shortcut shown like a key on a keyboard
 fn key_box(text: impl Into<SharedString>, cx: &App) -> Div {
     let theme = cx.theme();
     div()

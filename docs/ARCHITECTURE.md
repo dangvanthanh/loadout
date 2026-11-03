@@ -90,7 +90,7 @@ loadout/
       views/
         palette.rs                search, Into line, sections, keyboard, equip+launch; in its list area:
                                   skill preview (⌘Y), diff against loadout (⌘D), project chooser (⌘P)
-        menu.rs                   the menu bar menu (Rex-style: header, info rows, actions)
+        menu.rs                   the menu bar menu
         settings.rs               Settings window: sidebar, Interface/Shortcuts/Integrations/Notifications/
                                   Projects/History pages, page routing
         settings/library.rs       Skills (favorites, what changed) and Loadouts (members, import preview) pages

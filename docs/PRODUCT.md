@@ -124,7 +124,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - Actions ⌘K lists every action for the highlighted row with its shortcut, like Tinycast.
 - Section labels here are the one exception to "no section titles": they explain *why* something is selected.
 
-### Menu bar menu — 290 pt, for glancing (like Rex's)
+### Menu bar menu — 290 pt, for glancing
 
 ```
 ╭──────────────────────────────────╮
@@ -143,7 +143,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ╰──────────────────────────────────╯
 ```
 
-### Settings — a window with a sidebar (like Rex's)
+### Settings — a window with a sidebar
 
 ```
 ╭───────────────┬──────────────────────────────────────────────╮

@@ -28,3 +28,5 @@ rustc-ice-*.txt
 
 # Plan execution scratch
 .superpowers/
+.agents/
+skills-lock.json

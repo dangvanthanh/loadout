@@ -1,7 +1,7 @@
 # Loadout — Design guide (GPUI + GPUI Kit)
 
 Calm, fast, native-feeling. The palette should feel like Spotlight or Raycast; the menu like a system menu extra; Settings like
-a macOS settings window (Rex's: sidebar of colored icons, grouped cards).
+a macOS settings window.
 When in doubt, remove it.
 
 ## Rules
@@ -37,7 +37,7 @@ When in doubt, remove it.
 | Menu | 290 px wide: 54 px header (34 px app icon, name, status dot), info rows, 28 px items with shortcuts on the right |
 | Settings window | 800 × 600 (min 700 × 480), transparent titlebar; 220 px sidebar (theme sidebar colors), 30 px items with 20 px colored icon squares |
 | Settings card | radius 10, faint foreground wash, hairline dividers; 44 px rows: label + 11 px hint left, control right |
-| Shortcut key | 160 × 24 gray box, centered keys (Rex) |
+| Shortcut key | 160 × 24 gray box, centered keys |
 | Settings list row | 44 px, padding 8, radius 10, 26 px tile |
 | Paste field (Skills) | 34 px, fully rounded, faint foreground wash |
 | Lists | palette: what fits in 475 pt (about 7 rows); Settings pages scroll as a whole |
