@@ -151,18 +151,6 @@ impl Render for Menu {
         } else {
             (theme.success, "Ready".into())
         };
-        let target: SharedString = if settings.global {
-            "Global".into()
-        } else {
-            state
-                .target
-                .root
-                .clone()
-                .or_else(|| state.recent_projects().into_iter().next())
-                .and_then(|root| root.file_name().map(|n| n.to_string_lossy().into_owned()))
-                .unwrap_or_else(|| "No project yet".into())
-                .into()
-        };
         let checked: Option<SharedString> = state
             .last_checked
             .map(|at| provenance::ago(at, provenance::now()).into());
@@ -237,7 +225,6 @@ impl Render for Menu {
             .child(
                 div()
                     .py(px(4.))
-                    .child(info("Into", target))
                     .child(info("Version", env!("CARGO_PKG_VERSION").into())),
             )
             .child(separator(cx))

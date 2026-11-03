@@ -22,8 +22,8 @@ const TICK: Duration = Duration::from_secs(3600);
 fn main() {
     let app = gpui_kit::application().with_assets(assets::AppAssets);
     app.on_open_urls(macos::url_scheme::push);
-    // Clicking Loadout in the Dock (or opening it again) brings up Settings.
-    app.on_reopen(|cx| windows::open_settings(None, cx));
+    // Clicking Loadout in the Dock (or opening it again) brings up the palette.
+    app.on_reopen(windows::show_palette);
     app.run(|cx| {
         gpui_kit::init(cx);
         cx.set_activation_policy(ActivationPolicy::Accessory);

@@ -23,7 +23,23 @@ pub fn toggle_palette(cx: &mut App) {
     {
         return;
     }
-    // Read the frontmost app before the palette exists, so it is never Loadout.
+    open_new_palette(cx);
+}
+
+/// Opens the palette unless it's already open (a Dock click).
+pub fn show_palette(cx: &mut App) {
+    let open = cx
+        .default_global::<PaletteWindow>()
+        .0
+        .is_some_and(|handle| handle.update(cx, |_, _, _| ()).is_ok());
+    if !open {
+        open_new_palette(cx);
+    }
+}
+
+fn open_new_palette(cx: &mut App) {
+    // Read the frontmost app before the palette exists, so it is never Loadout. After a Dock
+    // click Loadout is frontmost, so this is `None` and the palette uses the last project.
     let app = frontmost::frontmost_app();
     let state = cx.global::<GlobalAppState>().0.clone();
     state.update(cx, |state, cx| state.detect_target(app, cx));

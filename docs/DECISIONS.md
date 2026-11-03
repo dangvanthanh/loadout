@@ -528,7 +528,7 @@ Kit's multi-select Combobox; not done, since nobody asked for it.
     Finder / Forget, Add Project…). History has History / Output tabs and All / This project / This skill filters.
 **Gaps filled while moving:** "Copy install command" on skill rows (PRODUCT's row interactions listed it; never
 built), the launch-command editor (DECISIONS 040 deferred it), a reachable Output view, a Loadouts page. With
-"Dock" only, clicking the Dock icon opens Settings and a minimal app menu (Settings…, Quit) appears. Notifications
+the Dock icon shown, a minimal app menu (Settings…, Quit) appears; clicking the Dock icon opens the palette (051). Notifications
 and imports open Settings → Skills / Loadouts. Settings data.json keys: `appIcon`, `iconPlace`,
 `showWindowOnLaunch`; unknown values fall back to defaults instead of failing the file.
 **Not done:** "Search Settings" field and back/forward buttons; the Dock icon variant only applies while the
@@ -536,3 +536,10 @@ Dock icon shows, and Finder and notifications keep AppIcon.icns.
 **Verified:** the menu (light and dark) and all eight pages were rendered to images through GPUI's Metal
 `render_to_image` in a throwaway build. Recording a shortcut, the Dock modes, and the save/reveal panels were not
 exercised here.
+
+## 051 — Clicking the Dock icon opens the palette
+**Choice:** With Loadout in the Dock, clicking its icon (or opening the app again) opens the palette, the same
+as the shortcut; if the palette is already open it stays. Settings stays one step away in the app menu (⌘,) and
+the menu bar menu.
+**Cost:** a Dock click makes Loadout the frontmost app, so the palette can't see which project you were in. It
+targets the last used project (shown as "Last used" on its chip), and ⌘P picks another.

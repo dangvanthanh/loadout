@@ -593,10 +593,10 @@ impl SettingsWindow {
         };
         let place_hint: Option<SharedString> = match place {
             IconPlace::Dock => Some(
-                "Without the menu bar icon, click Loadout in the Dock or press the palette shortcut."
+                "Without the menu bar icon, click Loadout in the Dock (or press the shortcut) for the palette; Settings is in the app menu (⌘,)."
                     .into(),
             ),
-            IconPlace::DockAndMenuBar => Some("The Dock icon uses the app icon above.".into()),
+            IconPlace::DockAndMenuBar => Some("The Dock icon uses the app icon above; clicking it opens the palette.".into()),
             IconPlace::MenuBar => None,
         };
         let switch =
