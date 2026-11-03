@@ -3,9 +3,10 @@
 Loadout is a minimal macOS menu bar app written in **Rust** with **GPUI** (Zed's UI framework) and **GPUI Kit**
 (Longbridge's component library). Its job: **put the right skills into the project you're in, one keystroke away.**
 
-⌃⌥L opens a palette that detects the frontmost project and its stack, ranks and pre-selects matching favorite skills
+⌃⌥L (or a Dock click) opens a palette that detects the frontmost project and its stack, ranks and pre-selects matching favorite skills
 (and loadouts), and installs them with `npx skills add`. It can optionally launch the preferred agent, show a diff
-against a loadout, track calm updates via the GitHub trees API, and keep a local provenance log.
+against a loadout, track calm updates via the GitHub trees API, and keep a local provenance log. The menu bar
+icon opens a small menu; everything else is managed in the Settings window.
 
 Stay inside that positioning. Don't add marketplace browsing, skill editing, enable/disable, usage stats, or sync —
 competitors do those (see `docs/COMPETITORS.md`). If a request drifts there, say so and ask first.
@@ -15,7 +16,7 @@ Read before changing anything:
 - `docs/COMPETITORS.md` — what others already do, and what we leave to them
 - `docs/ARCHITECTURE.md` — crates, modules, data model, flows, rules
 - `docs/DESIGN.md` — UI rules (minimal, theme colors only, one primary button)
-- `docs/PLAN.md` — the task list. Work on one task at a time, in order.
+- `docs/PLAN.md` — how to add work (the original M0–M5 plan is done); `docs/RELEASE.md` — release steps
 - `docs/DECISIONS.md` — past choices; add an entry for new ones
 - `reference/swift-prototype/` — earlier SwiftUI version (old name SkillDock). Port behavior from it
   (parser cases, command format, update logic). Don't edit it.
@@ -28,13 +29,13 @@ cargo test -p loadout-core                    # fast logic tests (run these cons
 cargo clippy --all-targets -- -D warnings     # must pass
 cargo fmt                                     # format
 cargo run -p loadout                      # quick UI run (unbundled: no notifications/login item)
-packaging/bundle.sh --install                 # release .app → /Applications, relaunch (exists from T0.4)
+packaging/bundle.sh --install                 # release .app → /Applications, relaunch
 pkill -x loadout; pkill -x Loadout        # stop a running copy
 ```
 
 ## How to work
 
-1. Pick the first unchecked task in `docs/PLAN.md` (or the one the user names).
+1. Take the change the user names, or the first unchecked task in `docs/PLAN.md` / `docs/RELEASE.md`.
 2. Read the files it touches. For GPUI/GPUI Kit APIs, check the pinned version's docs on docs.rs and GPUI Kit's
    examples before writing code — APIs change between releases. Don't guess method names.
 3. Implement. Put logic in `loadout-core` with tests; keep `loadout` thin.
@@ -59,7 +60,7 @@ pkill -x loadout; pkill -x Loadout        # stop a running copy
   **Never run `npx skills check` or `npx skills update`** — they change files.
 - **Errors:** `thiserror` in core, `anyhow` in app. No `unwrap()`/`expect()` outside tests and startup invariants.
 - **Dependencies:** only those listed in `ARCHITECTURE.md`. Adding one needs a `DECISIONS.md` entry and the user's OK.
-- **macOS glue:** `objc2` family crates (plus the Accessibility FFI chosen in T0.3), only in `loadout/src/macos/`
+- **macOS glue:** `objc2` family crates (plus the small Accessibility `extern "C"` block over `core-foundation`), only in `loadout/src/macos/`
   and `tray.rs`. Keep `unsafe` blocks small, each with a `// SAFETY:` comment.
 - **UI:** follow `docs/DESIGN.md`. GPUI Kit components first, theme colors only (no hex), sentence case,
   no "please"/"successfully"/"!". The palette is keyboard-first. If a change adds a visible button, ask whether it
@@ -67,7 +68,7 @@ pkill -x loadout; pkill -x Loadout        # stop a running copy
 
 ## Gotchas
 
-- GPUI needs full Xcode for Metal shader compilation (see T0.1). If the build fails at a `metal` step, run
+- GPUI needs full Xcode for Metal shader compilation (DECISIONS 017). If the build fails at a `metal` step, run
   `xcode-select -p` and check Xcode is selected, not just Command Line Tools.
 - GPUI Kit pins its GPUI release; don't add a separate `gpui` dependency that could mismatch.
 - Notifications and `SMAppService` only work from the bundled `.app` (`packaging/bundle.sh`), not `cargo run`.

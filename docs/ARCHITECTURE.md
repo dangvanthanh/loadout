@@ -2,27 +2,34 @@
 
 ## Overview
 
-A single-process macOS menu bar app in Rust. UI with **GPUI** (Zed's GPU-accelerated framework, Metal on macOS) and
-**GPUI Kit** (Longbridge's components). No server.
+A single-process macOS app in Rust that lives in the menu bar (and optionally the Dock). UI with **GPUI** (Zed's
+GPU-accelerated framework, Metal on macOS) and **GPUI Kit** (Longbridge's components). No server.
 
-Two surfaces:
-- **Palette** (⌃⌥L, 520 pt): the main flow — detect the project you're in, suggest and rank skills for its stack + context, install, optionally launch agent, diff against loadout.
-- **Menu** (menu bar click, 290 pt): status, target, version, Open Palette, Update All, Check for Updates…, Settings…, Quit.
-- **Settings** (a normal window with a sidebar): Interface, Shortcuts, Integrations, Notifications, Skills, Loadouts,
-  Projects, History. Managing favorites, loadouts, projects, and history happens here.
+Three surfaces:
+- **Palette** (⌃⌥L or a Dock click, 750 × 475 pt): the main flow. Detect the project you're in, suggest and rank
+  skills and loadouts for its stack and context, install (with a safety glance), optionally launch the agent, diff
+  against a loadout, preview a skill, pick another project.
+- **Menu** (menu bar click, 290 pt): status, target, version, Open Palette, Update All, Check for Updates…,
+  Settings…, Quit.
+- **Settings** (a normal window with a sidebar): Interface, Shortcuts, Integrations, Notifications, Skills,
+  Loadouts, Projects, History. Managing favorites, loadouts, projects, and history happens here.
 
 Outside dependencies at runtime:
-1. The official **`skills` CLI** (`npx skills add`) performs every install and update.
-2. The **GitHub REST API** (read-only, unauthenticated by default) provides skill versions and file contents.
-3. Optional agent launchers (Pi, Cursor, etc.) via `open` / URL schemes / CLI when "equip + launch" is used.
+1. The official **`skills` CLI** (`npx -y skills add/remove … -y`) performs every install, update, and uninstall.
+2. The **GitHub REST API** (read-only; a token from the Keychain is optional) provides skill versions and folder
+   listings; `raw.githubusercontent.com` provides file text for the safety scan.
+3. Agent launchers: a `.command` file run by Terminal for CLI agents, `open -a` for editors, or the user's own
+   command (`settings.launchers`).
 
 ```mermaid
 flowchart LR
   subgraph app[loadout - GPUI]
     Hotkey[global hotkey] --> Palette[Palette window]
+    Dock[Dock click] --> Palette
     Front[frontmost: Finder / editor via AX] --> Palette
     Tray[tray: NSStatusItem] --> Menu[Menu window] --> Settings[Settings window]
     Palette --> State[AppState entity]
+    Menu --> State
     Settings --> State
     State --> Notify[notifications + digest]
   end
@@ -39,16 +46,19 @@ flowchart LR
     Storage[storage]
   end
   State --> core
-  Installer -->|zsh -lc npx skills add| CLI[skills CLI]
-  Updates -->|trees + raw files| GitHub[(GitHub)]
+  Installer -->|zsh -lc npx skills add/remove| CLI[skills CLI]
+  Updates -->|trees, blobs, raw files| GitHub[(GitHub)]
   Storage --> JSON[(data.json)]
   Provenance --> JSON
 ```
 
 ## Crates
 
-- **`loadout-core`** — every rule and non-UI side effect: parsing, project/stack/context detection, commands, GitHub, diff, safety/compat, storage, share links, provenance, loadout versioning. No GPUI dependency; `cargo test -p loadout-core` covers most behavior.
-- **`loadout`** — the GPUI binary: palette, menu, Settings window, tray, Dock icon, hotkey, frontmost-app detection, notifications, login item, agent launch.
+- **`loadout-core`** — every rule and non-UI side effect: parsing, project/stack/context detection, commands,
+  GitHub, diff, safety/compat, storage, share links, provenance, loadout versioning, digest timing, shortcut
+  formats. No GPUI dependency; `cargo test -p loadout-core` covers most behavior (149 tests).
+- **`loadout`** — the GPUI binary: palette, menu, Settings window, tray, Dock icon, hotkey, frontmost-app
+  detection, notifications, login item, Keychain, agent launch.
 
 ## Repository layout
 
@@ -59,139 +69,146 @@ loadout/
   crates/
     loadout-core/src/
       lib.rs
-      model.rs                    Favorite, Project, Loadout, Settings, SavedState (+ favorite edits), ProvenanceEntry
-      storage.rs                  load/save data.json (atomic), prototype import
-      agents.rs                   agent ids, project/global skill folders, launch commands
+      model.rs                    Favorite, Project, Loadout, Settings, SkillState, SavedState (+ edits), ProvenanceEntry
+      storage.rs                  load/save data.json (atomic), prototype import, corrupt-file recovery
+      agents.rs                   agent ids, names, project/global skill folders, list parsing
       parser.rs                   paste text → Vec<Favorite>
       ui_skills.rs                resolve ui-skills.com links
       project.rs                  find project root from any path                         (U1)
       stack.rs                    detect stack tags with evidence                         (U2)
-      context.rs                  recent files / open editors / git signals for ranking   (U2)
-      tags.rs                     suggest tags for a favorite; match + rank to stack+context (U2)
-      installer.rs                build + run `npx skills add/remove`, streaming
+      context.rs                  open file / git changes / recent files for ranking      (U2)
+      tags.rs                     suggest tags for a favorite; rank to stack + context    (U2)
+      installer.rs                build + run `npx skills add/remove`, streaming          (U6)
       installed.rs                read skills-lock.json / agent folders for existing installs
-      updates.rs                  GitHub trees, version per favorite                      (U3)
+      updates.rs                  GitHub trees, version per favorite, raw file reads      (U3)
       diff.rs                     SKILL.md diff + file changes (`similar`)                (U3)
       safety.rs                   heuristic scan + compatibility notes                    (U4)
-      loadout_diff.rs             missing / extra skills vs a loadout                     (U7)
-      share.rs                    loadout:// links, .loadout.json, team versioning        (U5, U10)
-      provenance.rs               append-only local audit log                             (U8)
+      loadout_diff.rs             missing / present / extra skills vs a loadout           (U7)
+      share.rs                    loadout:// links, .loadout.json, team versions          (U5, U10)
+      provenance.rs               append-only local audit log, one-line descriptions      (U8)
+      launch.rs                   which launcher opens an agent                           (U9)
       digest.rs                   when the digest is due, and its one-line summary        (U11)
       shortcut.rs                 palette shortcut: spec ↔ ⌃⌥L display ↔ recorded keystroke
-      launch.rs                   preferred-agent launch helpers                          (U9)
     loadout-core/tests/fixtures/  projects/, trees/, html/, data/
     loadout/src/
-      main.rs                     Application, gpui_kit::init, activation policy, hotkey, tray, timers
-      assets.rs                   GPUI Kit assets + extra icons (icon_assets!)
-      state.rs                    AppState entity: data + session + actions
-      hotkey.rs                   palette shortcut via global-hotkey (live re-register), polled by a timer
-      tray.rs                     NSStatusItem (objc2), menu toggle, icon state, visibility
-      windows.rs                  palette, menu, and Settings window lifecycle, positioning, close on blur
+      main.rs                     Application, init, key bindings, app menu, hotkey + tray poll, hourly tick
+      assets.rs                   GPUI Kit assets, extra icons (icon_assets!), app icon variants
+      state.rs                    AppState entity: data + session + every action (install, update, check, …)
+      hotkey.rs                   palette shortcut via global-hotkey (live re-register)
+      tray.rs                     NSStatusItem (objc2): click flag, update dot, visibility
+      windows.rs                  palette, menu, and Settings window lifecycle and positioning
       views/
-        palette.rs                search, Into line, sections, keyboard, equip+launch; in its list area:
+        palette.rs                search, target chip, sections, keyboard, ⌘K actions; in its list area:
                                   skill preview (⌘Y), diff against loadout (⌘D), project chooser (⌘P)
         menu.rs                   the menu bar menu
-        settings.rs               Settings window: sidebar, Interface/Shortcuts/Integrations/Notifications/
-                                  Projects/History pages, page routing
-        settings/library.rs       Skills (favorites, what changed) and Loadouts (members, import preview) pages
+        settings.rs               Settings window: sidebar, routing, Interface / Shortcuts / Integrations /
+                                  Notifications / Projects / History pages
+        settings/library.rs       Skills (favorites, what changed) and Loadouts (members, import preview)
       macos/
-        frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
+        frontmost.rs              frontmost app → folder (Finder via osascript, AXDocument for the rest)
         login_item.rs             SMAppService
         dock.rs                   Dock icon image (app icon variants)
-        keychain.rs               GitHub token in the login Keychain (security-framework)
+        keychain.rs               GitHub token in the login Keychain
         url_scheme.rs             loadout:// and opened-file events, drained by the main poll loop
-        launch.rs                 open agent via URL scheme / CLI
-    loadout/assets/           tray/menubar@2x.png (template), app-icon/ variants (make-variants.sh)
+        launch.rs                 open an agent: .command file, open -a, or a custom command
+    loadout/assets/               tray/ (template icons), app-icon/ (variants from make-variants.sh)
   packaging/
-    Info.plist                    LSUIElement, CFBundleURLTypes (loadout), NSAppleEventsUsageDescription
-    bundle.sh                     release build → Loadout.app (+ --install, --universal, --release)
+    Info.plist                    LSUIElement, URL scheme, JSON Open With, Apple events description
+    bundle.sh                     release build → Loadout.app (--install, --universal, --release)
     entitlements.plist            hardened runtime (Apple events) for Developer ID builds
     homebrew/loadout.rb           cask template; version + sha256 come from bundle.sh --release
-    AppIcon.icns, icon/           app icon + make-icns.sh / make-menubar.sh (regenerate from reference art)
-  reference/swift-prototype/      earlier SwiftUI version (old name SkillDock); behavior reference
-  docs/
-  AGENTS.md                       rules for Pi Harness (and other agents)
+    AppIcon.icns, icon/           app icon + make-icns.sh / make-menubar.sh / make-variants.sh
+  reference/                      SwiftUI prototype (SkillDock) and design reference images
+  docs/                           PRODUCT, ARCHITECTURE, DESIGN, DECISIONS, PLAN, RELEASE, COMPETITORS
+  AGENTS.md                       rules for coding agents working in this repo
 ```
 
 ## Dependencies
 
-Pin exact versions in `Cargo.toml` at T0.1 after checking crates.io. Let **`gpui-kit` choose the GPUI version**;
-don't add a separate `gpui` line unless GPUI Kit's docs say so.
+GPUI comes from `gpui-kit` (pinned `=0.8.1`, which brings `gpui-pre` 0.3.10); don't add a separate `gpui` line.
+Adding a crate needs a `DECISIONS.md` entry and the owner's OK.
 
 | Crate | Where | Use |
 |---|---|---|
-| `gpui-kit` | app | Components, theme, `Root`; brings the matching GPUI |
-| `objc2`, `objc2-foundation`, `objc2-app-kit` | app | Tray, activation policy, `NSWorkspace` frontmost app, `NSAppleScript` |
-| Accessibility FFI (`accessibility-sys` or a small `extern "C"` block + `core-foundation`) | app | `AXDocument` of the focused window — decide in T0.3 |
-| `objc2-service-management` | app | Open at login (notifications come from GPUI itself, DECISIONS 019) |
-| `global-hotkey` | app | ⌃⌥L |
-| `security-framework` | app | GitHub token in Keychain (M5) |
-| `serde`, `serde_json`, `uuid` | core | Data, GitHub responses |
+| `gpui-kit` | app | GPUI, components, theme, assets |
+| `objc2`, `objc2-foundation`, `objc2-app-kit` | app | Tray, Dock icon, activation, `NSWorkspace` frontmost app, screens |
+| `core-foundation` | app | Accessibility FFI (`AXDocument`) through a small `extern "C"` block |
+| `objc2-service-management` | app | Open at login |
+| `global-hotkey` | app | The palette shortcut |
+| `security-framework` | app | GitHub token in the Keychain |
+| `anyhow` | app | Errors |
+| `serde`, `serde_json`, `uuid` | core | Data, GitHub responses, share files |
 | `ureq` (rustls) | core | Blocking HTTP, always off the main thread |
-| `sha2`, `hex` | core | Whole-repo version hash |
+| `sha2`, `hex` | core | Whole-repo and root-skill version hashes |
 | `similar` | core | Line diff |
-| `regex` | core | Parser, ui-skills scraping, safety rules |
-| `base64` | core | Share links |
-| `dirs` | core | Application Support path |
-| `thiserror` (core), `anyhow` (app) | both | Errors |
-| `chrono` or `time` | core | Provenance timestamps, digest windows |
+| `regex` | core | ui-skills scraping, stack and safety rules |
+| `base64` | core | GitHub blobs, share links |
+| `dirs` | core | Application Support and cache paths |
+| `thiserror` | core | Errors |
 
-No tokio. Blocking work runs on GPUI's background executor.
+No tokio. Blocking work runs on GPUI's background executor; notifications are posted through GPUI.
 
 ## Data model (`loadout-core::model`)
 
+Persisted as `~/Library/Application Support/Loadout/data.json`. Keys are camelCase; every field has a default;
+prototype keys (`autoCheck`, `global`, `selectedProjectID`, `installed`) are kept (DECISIONS 020).
+
 ```rust
-#[serde(rename_all = "camelCase")]
 pub struct Favorite {
     pub id: Uuid,
     pub name: String,
     pub source: String,              // anything `npx skills add` accepts
     pub skill: Option<String>,       // None = every skill in the source
-    #[serde(default)] pub tags: Vec<String>,          // stack tags, e.g. ["react","nextjs"]
+    pub tags: Vec<String>,           // e.g. ["react", "nextjs"]; suggested when empty
 }
 
 pub struct Project {
     pub id: Uuid,
     pub path: PathBuf,
-    #[serde(default)] pub last_used: Option<u64>,
+    pub last_used: Option<u64>,      // unix seconds
 }
 
 pub struct Loadout {
     pub id: Uuid,
-    pub name: String,
+    pub name: String,                // unique, case-insensitive
     pub favorite_ids: Vec<Uuid>,
-    #[serde(default)] pub tags: Vec<String>,          // suggest this loadout for matching stacks
-    #[serde(default)] pub preferred_agent: Option<String>, // "pi", "claude-code", "cursor", …
-    #[serde(default)] pub version: Option<String>,    // for team/shared loadouts
-    #[serde(default)] pub source: Option<String>,     // https URL the team publishes it at
+    pub tags: Vec<String>,           // suggest for matching stacks; else the union of its skills' tags
+    pub preferred_agent: Option<String>, // "pi", "claude-code", "cursor", …
+    pub version: Option<String>,     // team loadouts
+    pub source: Option<String>,      // https URL the team publishes it at
 }
 
 pub struct Settings {
-    #[serde(default = "default_agents")] pub agents: String,     // comma-separated or primary
-    #[serde(default = "default_hotkey")] pub hotkey: String,     // "ctrl+alt+KeyL"
-    #[serde(default)] pub global: bool,                          // prototype key
-    #[serde(default)] pub auto_check: bool,                      // prototype key "autoCheck"
-    #[serde(default)] pub digest_enabled: bool,                  // U11
-    #[serde(default)] pub digest_interval_hours: u32,            // e.g. 24 or 168
-    #[serde(default)] pub launch_after_install: bool,            // default for equip+launch
-    #[serde(default)] pub launchers: BTreeMap<String, String>,   // agent id → shell command, {dir} = project
-    #[serde(default)] pub app_icon: AppIcon,                     // default | twilight | graphite
-    #[serde(default)] pub icon_place: IconPlace,                 // menuBar | dockAndMenuBar | dock
-    #[serde(default)] pub show_window_on_launch: bool,
-    // … other calm defaults
+    pub agents: String,              // "-a" list, "claude-code, cursor"; empty = the CLI detects
+    pub global: bool,                // install with -g instead of into a project
+    pub auto_check: bool,            // 6-hourly update checks (default on)
+    pub hotkey: String,              // "ctrl+alt+KeyL"
+    pub digest_enabled: bool,
+    pub digest_interval_hours: u32,  // 24 or 168
+    pub launch_after_install: bool,  // Return also opens the agent
+    pub launchers: BTreeMap<String, String>, // agent id → shell command, {dir} = project
+    pub app_icon: AppIcon,           // default | twilight | graphite
+    pub icon_place: IconPlace,       // menuBar | dockAndMenuBar | dock
+    pub show_window_on_launch: bool,
+}
+
+pub struct SkillState {              // keyed by "source" or "source@skill"
+    pub pinned: bool,
+    pub ignored_version: Option<String>,
+    pub notified_version: Option<String>,
 }
 
 pub struct ProvenanceEntry {
     pub id: Uuid,
     pub ts: u64,                     // unix seconds
-    pub action: String,              // "install" | "update" | "remove" | "apply_loadout"
+    pub action: String,              // install | update | remove | apply_loadout | import_loadout
     pub project_path: Option<String>,
     pub skill_source: String,
     pub skill_name: Option<String>,
     pub tree_sha: Option<String>,
     pub loadout_id: Option<Uuid>,
     pub agent: Option<String>,
-    pub note: Option<String>,
+    pub note: Option<String>,        // "from Web app", "version 1.2"
 }
 
 pub struct SavedState {
@@ -199,41 +216,45 @@ pub struct SavedState {
     pub projects: Vec<Project>,
     pub loadouts: Vec<Loadout>,
     pub settings: Settings,
-    pub selected_project_id: Option<Uuid>,       // prototype key "selectedProjectID"
-    pub installed: BTreeMap<String, String>,     // prototype key: "<project id|global>|<favorite id>" → version
-    pub skill_state: BTreeMap<String, SkillState>, // key = source or source@skill: pinned, ignoredVersion, notifiedVersion
-    #[serde(default)] pub provenance: Vec<ProvenanceEntry>,
-    #[serde(default)] pub last_digest: Option<u64>,     // "lastDigest": when the digest last ran
-    // keep append-only; trim old entries in a later polish task if needed
+    pub selected_project_id: Option<Uuid>,         // "selectedProjectID"
+    pub installed: BTreeMap<String, String>,       // "<project id|global>|<favorite id>" → version ("?" = unknown)
+    pub provenance: Vec<ProvenanceEntry>,          // append-only
+    pub skill_state: BTreeMap<String, SkillState>,
+    pub last_digest: Option<u64>,
 }
 ```
+
+The GitHub token is not in data.json; it's in the login Keychain (service `local.loadout.app`).
 
 ## Key flows
 
 ### Equip (palette Return)
-1. Resolve target project (U1) + stack + light context signals (U2).
-2. Rank/pre-select favorites and matching loadouts.
-3. On Return: run `npx skills add` for selected items that are not already installed.
-4. Write provenance entries (U8).
-5. If equip+launch (U9) and a preferred agent is known → launch.
+1. Detect the target off the main thread: frontmost app → folder → project root → stack, installed skills, and
+   context signals (U1, U2). A chosen project or Global overrides it.
+2. Rank favorites and loadouts; pre-select stack matches.
+3. On Return: expand loadouts into skills; skip installed ones; update the ones behind.
+4. First installs get the safety glance (scan, then a notice; Return again installs anyway) (U4).
+5. Run `npx skills add` one by one, streaming output; record versions, `install`/`update` provenance, and one
+   `apply_loadout` entry per loadout (U6, U8).
+6. With ⌘↩ (or "open after installing"), open the agent unless every job failed (U9).
 
 ### Diff against loadout (U7)
-Compare installed skills in the target project vs the loadout’s favorite set.
-Show missing / extra / up-to-date in a simple list. No automatic install; user confirms.
+Missing (selectable, pre-selected), installed, and extra skills for the target, computed live from Loadout's
+records plus the lock file and agent folders. Return installs the missing ones through the equip flow.
 
 ### Update (U3)
-GitHub tree SHA of the skill folder only. README-only changes never surface.
-Before applying: show file list + SKILL.md diff. Pin or ignore supported.
-
-### Safety + compatibility (U4)
-Heuristic scan on first install of a skill into any project. Flags common risky patterns and notes simple compatibility signals. Never blocks; only informs.
+An hourly tick runs the 6-hourly check (or the digest when it's on): one tree listing per repo, only for skills
+with a known installed version. A version is the skill folder's tree SHA, so README-only changes never surface.
+What changed shows the file list and SKILL.md diff. Pin and ignore persist in `skillState`.
 
 ### Team loadouts (U10)
-A versioned `.loadout.json` (or `loadout://` payload) that includes a version field and optional signature/source.
-Import still goes through the same apply path and official CLI.
+A `.loadout.json` or `loadout://` link with `version` and an https `source`. "Check for a newer version" fetches the
+source and previews the import only if it's newer. Every import is validated and previewed; nothing installs until
+the palette.
 
 ### Digest (U11)
-Background timer (or login-item friendly check). If real updates exist across projects since last digest, post one quiet notification summarizing count + top skills. Clicking it opens Settings → Skills.
+When on and due, one check and at most one notification per interval naming what's pending. Clicking it opens
+Settings → Skills.
 
 ## Rules (enforced in AGENTS.md)
 
@@ -242,5 +263,5 @@ Background timer (or login-item friendly check). If real updates exist across pr
 - Never run `npx skills check` or `npx skills update`.
 - Every shell argument goes through `shq`.
 - No new dependencies without a DECISIONS entry.
-- Persist with `#[serde(default)]`; never rename or remove keys casually.
+- Persist with `#[serde(default)]`; never rename or remove keys.
 - Provenance is append-only and local-only.

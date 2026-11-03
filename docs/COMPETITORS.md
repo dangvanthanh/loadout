@@ -1,6 +1,7 @@
 # Loadout — Competitors
 
-Researched October 2026. Star counts are approximate and change quickly; re-check before any public launch.
+Researched October 2026. Star counts are approximate and change quickly; re-check before any public launch
+(`RELEASE.md`).
 
 ## Summary
 
@@ -53,7 +54,7 @@ directory, and [ui-skills.com](https://www.ui-skills.com/). Loadout builds on th
 | **Idle “what changed” digest** | — | — | — | — | ✅ |
 | **Installs via the official `skills` CLI** | — | — | ◐ parses commands | — | ✅ |
 
-The bold rows are where Loadout leads. Everything in the plan's first milestones serves them.
+The bold rows are where Loadout leads; all of them are built (`PRODUCT.md` → Status).
 
 ## Risks
 

@@ -4,7 +4,7 @@
 
 **The right skills for the project you're in, one keystroke away.**
 
-_Built with Rust, GPUI and GPUI Kit. macOS 13+._
+_Built with Rust, GPUI and GPUI Kit. macOS 13+. Version 0.1.0; see `RELEASE.md` for what's left before release._
 
 ## Positioning
 
@@ -21,7 +21,7 @@ Who it's for: developers who use coding agents (Pi, Claude Code, Cursor, Codex, 
 ## Principles
 
 1. **Where you are.** Act on the project in front of you. Never make the user pick a folder they're already looking at.
-2. **Minimal.** One small window, one primary button. Everything else lives in a menu or a right-click.
+2. **Minimal.** One palette, one primary action. Everything else lives in ⌘K, a right-click, or Settings.
 3. **Calm.** No badges for README edits, no auto-updates, no nagging. Files change only when you press a button.
 4. **Honest.** Show what will run, what will change, and what a skill contains before it lands in your project.
 5. **Built on the ecosystem.** Installs go through the official `npx skills` CLI; versions come from GitHub.
@@ -32,16 +32,16 @@ Who it's for: developers who use coding agents (Pi, Claude Code, Cursor, Codex, 
 
 | # | Feature | What it does |
 |---|---|---|
-| U1 | **Project you're in** | The palette targets the frontmost Finder folder, or the project open in your editor (Zed, VS Code, Cursor, Xcode via the Accessibility "document" attribute), walking up to the nearest `.git` / `package.json` / `Cargo.toml`. Falls back to the last project. |
+| U1 | **Project you're in** | The palette targets the frontmost Finder folder, or the project open in your editor (Zed, VS Code, Cursor, Xcode, Terminal via the Accessibility "document" attribute), walking up to the nearest `.git` or manifest (`package.json`, `Cargo.toml`, …). Falls back to the last project; ⌘P picks another or Global. |
 | U2 | **Stack-aware + context-weighted suggestions** | Detects the stack (Next.js, React, Vue, Svelte, Expo, Tailwind, SwiftUI, Rust, Python, Go …). Favorites carry stack tags (auto-suggested from the skill's name and description). Matching favorites are pre-selected and ranked higher when they also match recent files, open editors, or git status signals. Label: "Suggested for Next.js + Tailwind". |
 | U3 | **Calm, honest updates** | Tracks each skill's own folder on GitHub, so README or other-skill changes never count. Before updating: a file list and a `SKILL.md` diff. Pin a version, or ignore one update. |
-| U4 | **Safety + compatibility glance** | Before a skill first lands in any project: flags scripts, `curl … \| sh`, `rm -rf`, `sudo`, big encoded blobs, unknown hosts. Also notes simple compatibility signals (skills CLI version, Node version hints, agent folder requirements). Advice, never a block. |
+| U4 | **Safety + compatibility glance** | Before a skill first lands in any project: flags scripts, `curl … \| sh`, `sudo`, deletes outside the project, encoded commands, credential reads, secrets sent over the network, `chmod 777`, prompt-injection phrases, and invisible characters. Notes compatibility signals (no SKILL.md or description, `allowed-tools`, `.claude/` paths, Python or Node scripts). Advice, never a block; ⌘Y previews any skill. |
 | U5 | **Agent-aware loadouts** | Named sets of skills ("Web app", "iOS app") that can declare preferred agents (Pi, Claude Code, Cursor, Codex, …). Apply to a project in one keystroke. When applied, installs into the correct agent folders and can optionally launch the preferred agent. |
 | U6 | **Official CLI underneath** | Every install is `npx skills add … -y`, so lock files and 30+ agent folder layouts stay exactly as the ecosystem expects. Paste any `npx skills add` command to save its skills as favorites. |
 | U7 | **Diff against loadout** | One-click (or keyboard) view of what the current project is missing versus a named loadout or the suggested one. Makes gaps obvious before you install. |
 | U8 | **Skill provenance + audit** | Lightweight local log of what was installed/updated/removed, when, from which commit/tree, into which project, and by which action (palette, loadout apply, update). Plain JSON; useful for personal history and light team trust. |
 | U9 | **One-shot equip + launch** | After installing (or applying a loadout), optionally launch the preferred agent for that loadout/project with a single extra key or checkbox. |
-| U10 | **Shared team loadouts with versioning** | Beyond one-off `loadout://` links and `.loadout.json` files: versioned team loadouts (simple git-backed or signed snapshot) that still install through the official CLI. Import stays one click. |
+| U10 | **Shared team loadouts with versioning** | Beyond one-off `loadout://` links and `.loadout.json` files: a loadout can carry a version and the https URL the team publishes it at; "Check for a newer version" previews the update before importing. Still installs through the official CLI. (Signatures are not built.) |
 | U11 | **Idle “what changed” digest** | Optional quiet daily/weekly notification summarizing real skill updates across your projects. Still never noisy; only surfaces changes that would have raised an Update pill. |
 
 ## Non-goals (deliberate)
@@ -53,48 +53,24 @@ Who it's for: developers who use coding agents (Pi, Claude Code, Cursor, Codex, 
 - Windows / Linux builds in v1 (GPUI supports them, but U1, tray, and notifications are macOS code).
 - Mac App Store (sandboxing blocks `npx` in project folders).
 
-## Feature list and status
+## Status
 
-✅ done in the Rust app · ⬜ to build. Milestones refer to `PLAN.md`.
-Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built under the old name SkillDock).
+Everything above is built (✅ U1–U11). Remaining work is the public release: `RELEASE.md`.
 
-### M0 — Foundation
-- ✅ GPUI + GPUI Kit app, menu bar icon, menu under the icon, optional Dock icon
-- ✅ Global hotkey ⌃⌥L opens a palette window
-- ✅ Frontmost Finder/editor folder detection (spike for U1)
-- ✅ App bundle, notifications, open at login
+- **Palette (⌃⌥L):** detected project and stack, ranked and pre-selected favorites and loadouts, Return installs,
+  ⌘↩ installs and opens the agent, ⌘K actions, ⌘Y preview, ⌘D diff against a loadout, ⌘S save as loadout,
+  ⌘P project or Global, ⌘⌫ uninstall, safety glance before first installs.
+- **Menu bar menu:** status, target, version, Open Palette, Update All, Check for Updates…, Settings…, Quit. The
+  menu bar icon gets a dot when updates are pending.
+- **Settings:** Interface (app icon, menu bar / Dock, show on launch, open at login), Shortcuts (record the palette
+  shortcut), Integrations (several coding agents, launch commands, open after installing, GitHub token),
+  Notifications (automatic checks, digest), Skills (add, tag, pin, ignore, what changed, update), Loadouts (edit,
+  share, import, team versions), Projects (Global, add, reveal, forget), History (provenance, CLI output).
+- **Data:** `~/Library/Application Support/Loadout/data.json`, imported once from the SkillDock prototype; the
+  GitHub token in the Keychain.
 
-### M1 — Core library (no UI, fully tested)
-- ✅ Model + storage, paste parser, installer, update checker
-- ✅ Project root finder + stack detector (U1, U2)
-- ✅ Diff, safety + compatibility scanner (U3, U4)
-- ✅ Provenance log model (U8)
-
-### M2 — The loop: "equip this project" (U1, U2, U6)
-- ✅ Palette: detected project + stack, favorites with suggestions pre-selected and ranked, Return installs
-- ✅ Favorites: paste to add (any format), tags, rename, remove
-- ✅ Installed state per project (incl. skills installed before Loadout)
-- ✅ Context signals for ranking (recent files / open editors when available)
-
-### M3 — Calm updates and trust (U3, U4, U8)
-- ✅ Update check, Update pill, notification, filled menu bar icon
-- ✅ What changed (files + SKILL.md diff), pin, ignore
-- ✅ Safety + compatibility glance on first install; skill preview
-- ✅ Provenance entries written on install/update, shown in History (remove entries come with uninstall, T5.4)
-
-### M4 — Loadouts and agent awareness (U5, U7, U9)
-- ✅ Create, apply, manage loadouts (including preferred agent)
-- ✅ Diff against loadout
-- ✅ One-shot equip + launch
-- ✅ Share and import via link or file
-
-### M5 — Team, digest, polish and release
-- ✅ Shared team loadouts with versioning (U10)
-- ✅ Idle “what changed” digest (U11)
-- ✅ Menu + Settings window (Interface, Shortcuts, Integrations, Notifications, Skills, Loadouts, Projects, History)
-- ✅ Uninstall from a project, GitHub token in Keychain, keyboard navigation
-- ✅ Icon, universal build, release script, Homebrew cask template
-- ⬜ Developer ID signing + notarization run, published cask (needs the owner's Apple account; DECISIONS 046)
+The SwiftUI prototype (`reference/swift-prototype/`, built under the old name SkillDock) is kept as a behavior
+reference only.
 
 ## Screens
 
@@ -172,14 +148,20 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - **Skills:** paste to add favorites; the list, what changed, Update All. **Loadouts:** edit, share, import.
   **Projects:** where installs go, add, reveal, forget. **History:** provenance and `skills` output.
 
-### Row interactions (palette and Settings)
-Click: toggle. Click name: preview. Right-click: Install only this / Update · What changed · Diff against loadout · Pin · Tags… · Copy install command · Rename… · Remove · View provenance.
+### Row interactions
+- **Palette:** click toggles; click the name to preview (a loadout's name shows its diff); ⌘K lists every action
+  for the highlighted row. Right-click: Uninstall (installed skills), Diff against loadout (loadouts).
+- **Settings → Skills:** right-click a skill for What changed · Pin / Unpin · History · Copy install command ·
+  Uninstall from this project · Rename… · Tags… · Remove. Hover shows ✕ remove; the Update pill opens what changed.
+- **Settings → Loadouts:** click to edit its skills; right-click for Rename… · Preferred agent… · Tags… · Version… ·
+  Source URL… · Check for a newer version · Copy link · Save file… · Remove.
+- **Settings → Projects:** click to install there; right-click for Reveal in Finder · Forget.
 
 ## Copy rules
 
 Sentence case. No "please", "successfully", or "!". Errors say what happened and what to do.
 Examples: "Installed 2 skills in shop-dashboard" · "Couldn't install tdd. See log." ·
-"GitHub limit reached. Try again in an hour." · "Suggested for Next.js" · "Missing 3 skills vs Web app loadout"
+"GitHub limit reached. Add a token in Settings, or try again in an hour." · "Suggested for Next.js" · "Missing 3 skills vs Web app loadout"
 
 ## Success measures (personal use first)
 

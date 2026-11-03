@@ -1,6 +1,12 @@
 # Loadout — Decision log
 
 Short records of choices that shaped the app. Add a new entry when you make a choice someone might later question.
+Entries are history: don't rewrite them. When a later entry replaces one, mark the old one with a
+"Superseded" line pointing forward.
+
+**Where things stand (2026-11-02):** the menu bar opens a small menu and Settings is its own window (050); the
+palette looks like Tinycast (047, 048) and opens from ⌃⌥L or a Dock click (051); release steps are in
+`RELEASE.md` (046).
 
 ## 001 — Wrap the `skills` CLI instead of copying files ourselves
 **Choice:** Every install runs `npx skills add … -y`.
@@ -47,6 +53,7 @@ A click that blurs the open popup is ignored for 400 ms so it doesn't reopen it.
 `MenuBarAgent`, but `button.window().frame()` still reports the icon's position.
 
 ## 009 — Menu bar only, no sandbox, plain JSON
+> **Superseded in part by 050:** a Dock icon is optional now (Settings → Interface). Still no sandbox, still plain JSON.
 **Why:** A 3-second utility; sandboxing blocks `npx` in project folders; JSON is easy to back up, diff, and share.
 
 ## 010 — Narrow positioning: "equip the project you're in"
@@ -117,6 +124,7 @@ pin keeps the GPUI flavor stable for the objc2 glue and any future tray crate.
 from `observe_window_appearance`.
 
 ## 018 — The palette is a non-activating panel
+> **Updated by 048:** Esc goes back before it closes; the Esc key binding is gone.
 **Choice:** The palette opens as GPUI `WindowKind::PopUp` (an `NSPanel` with `NonactivatingPanel`, popup level),
 titlebar `None`, on the screen AppKit calls `mainScreen` (the one with the frontmost app's key window). Esc and blur
 remove the window; the app policy is `Accessory`. ⌘Q quits while the palette has focus (no menu bar).
@@ -125,6 +133,7 @@ frontmost: focus returns by itself on close, and T0.3 can read the frontmost app
 The hotkey receiver is polled every 50 ms from a GPUI timer (no redraws).
 
 ## 019 — Notifications through GPUI; SF Symbol menu bar icon
+> **Superseded in part by 033:** the menu bar icon is the octopus template image. Notifications still go through GPUI.
 **Choice:** Post notifications with GPUI's `cx.show_system_notification` (it wraps `UNUserNotificationCenter` and
 skips posting when unbundled). No `objc2-user-notifications` dependency; `macos/notify.rs` waits for the digest
 (T5.2). The menu bar icon is the SF Symbol `square.stack.3d.up` (filled variant for updates), like the prototype.
@@ -194,6 +203,7 @@ description, `allowed-tools`, `.claude/` paths, and Python/Node script runtimes.
 **Verified live:** `anthropics/skills` → 20 skills; `skills/pdf` version = its tree SHA; its scripts are flagged.
 
 ## 026 — Palette keys, sections, and data ownership
+> **Updated by 038 and 048:** the Loadouts section exists; the Into line became the target chip.
 **Choice:** `AppState` loads `data.json` at launch (importing SkillDock's on first run). If it can't be read, it
 never saves over it. Each detection upserts the project into `projects` (`lastUsed`, `selectedProjectID`).
 Detection, `project::root_for`, and `stack::detect` run in one background task. The palette ranks favorites with
@@ -205,6 +215,7 @@ in the capture phase before the search field: ↑↓ move, Tab toggles, Space to
 (circle, sparkles) come from GPUI Kit's `icon_assets!`.
 
 ## 027 — Favorites are managed in the popup
+> **Superseded by 050:** favorites are managed in Settings → Skills.
 **Choice:** The popup's paste field (Return adds) accepts every parser format; ui-skills.com links resolve in the
 background. `SavedState::add_favorites` skips duplicates (same source, case-insensitive, and skill) and tags
 untagged favorites with `suggest_tags`. Right-click a row for Rename… / Tags… (inline field, Return saves, Esc
@@ -244,6 +255,7 @@ detection lands. A fast ⌃⌥L + Return would otherwise install into the fallba
 detection finished. An empty selection on an empty list does nothing. Found in the M2 self-review.
 
 ## 032 — App icon: the octopus in a bucket hat
+> **Superseded by 033:** the icon comes from `loadout-logo.png`.
 **Choice:** `packaging/icon/AppIcon.png` comes from `reference/images-prototype/logo.jpg` with the slate background
 removed. The tile is a fitted rounded square (inset 4 px past the source's dark anti-aliased rim); the hat's crown
 keeps its overhang above the tile. It follows the macOS icon grid: an 824 px body centered on a 1024 canvas,
@@ -308,6 +320,7 @@ Return again installed it, and it no longer counts as a first install. `curl …
 tests; no public skill I checked uses it.
 
 ## 037 — History in the popup
+> **Superseded by 050:** History is a Settings page, with an Output tab.
 **Choice:** ⚙ → History opens provenance in the popup's list area, newest first (up to 200 lines, 10 px monospace):
 "Updated frontend-design in shop · d79e2a5 · 2 hours ago". A "This project" / "All projects" toggle filters by the
 last detected project. A row's right-click → History shows that skill only. `provenance::describe` builds each line
@@ -317,6 +330,7 @@ already words them ("Removed tdd from blog").
 skill, project, tree SHA).
 
 ## 038 — Loadouts: saved from the palette, managed in the popup
+> **Superseded in part by 050:** loadouts are managed in Settings → Loadouts; saving from the palette (⌘S) is unchanged.
 **Choice:** ⌘S in the palette names the selection (favorites, plus the skills of any selected loadouts) as a new
 loadout, typed in place of the search; Return saves and Esc cancels. Its tags are the first two stack tags on the
 Into line, so it's suggested for projects like the one it came from. Names are unique (case-insensitive) and a
@@ -406,6 +420,7 @@ Turning it on starts counting from that moment rather than firing at once. No `m
 the bundled app.
 
 ## 044 — Where installs go, and the settings view
+> **Superseded in part by 050:** Settings is a window, and Projects has its own page; the palette's ⌘P chooser and Global are unchanged.
 **Choice:** The popup's top row ("Into: shop-dashboard ⌄") lists recent projects, Global (home folder), Add
 project… (folder picker), and Forget <project>. ⌘P in the palette shows the same choice in the list area. Picking
 a project targets it at once (its stack, installed skills, and context are re-read) and marks it "chosen" on the
@@ -462,6 +477,7 @@ slice is a valid x86_64 executable but wasn't run: this Mac has no Rosetta.
 - A clean-Mac install test of the cask.
 
 ## 047 — Window sizes: Tinycast's palette, a wider popup
+> **Superseded in part by 050:** the popup is gone; the 750 × 475 palette is unchanged.
 **Choice:** The palette is 750 × 475 pt (Tinycast's `panelWidth` / `panelHeight`), at a fixed height instead of
 growing with the row count, centered with its top edge 18% down the visible screen (Tinycast's
 `paletteTopMarginFraction`), and shrunk to fit screens smaller than that. Rows and bars grew with it: search 56 pt
@@ -495,6 +511,7 @@ GPUI's Metal `render_to_image` in a throwaway build (test-support features enabl
 committed). The glass itself only shows on screen.
 
 ## 049 — Agents is a Select
+> **Superseded by 050:** agents are checkboxes on Settings → Integrations, so several can be on.
 **Choice:** Settings → Agents is a searchable GPUI Kit `Select` instead of a text field: "Detect automatically"
 (empty `agents`, so the CLI picks), then every agent in `agents.rs`. GPUI Kit's Select picks one item, so choosing
 from it sets a single agent. A list configured some other way (several agents, or an id Loadout doesn't know,

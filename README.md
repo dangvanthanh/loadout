@@ -12,9 +12,9 @@ A minimal macOS menu bar app built with **Rust**, **GPUI**, and **GPUI Kit**.
 
 ## Status
 
-M0–M4 and most of M5 are built: the palette, favorites, calm updates, safety glances, loadouts with diff and
-launch, sharing, team versions, the digest, settings, and uninstall. What's left for a public release is a
-Developer ID-signed, notarized build and a published Homebrew cask ([DECISIONS 046](docs/DECISIONS.md)).
+Built: the palette, favorites, calm updates, safety glances, loadouts with diff and launch, sharing, team versions,
+the digest, the menu bar menu, Settings, and uninstall (all of U1–U11). What's left for a public release is a
+Developer ID-signed, notarized build and a published Homebrew cask: [`docs/RELEASE.md`](docs/RELEASE.md).
 
 | Doc | What's in it |
 |---|---|
@@ -22,8 +22,10 @@ Developer ID-signed, notarized build and a published Homebrew cask ([DECISIONS 0
 | [Competitors](docs/COMPETITORS.md) | Similar apps, feature overlap, what we leave to them |
 | [Architecture](docs/ARCHITECTURE.md) | Crates, modules, data model, flows, dependencies |
 | [Design](docs/DESIGN.md) | Palette, menu, and Settings UI rules for GPUI Kit |
-| [Plan](docs/PLAN.md) | Milestones M0–M5, unique features first |
-| [Decisions](docs/DECISIONS.md) | Why Rust + GPUI, the narrow positioning, the name, Pi Harness |
+| [Plan](docs/PLAN.md) | How to add work; the original M0–M5 plan is done |
+| [Release](docs/RELEASE.md) | Release status, owner steps, hand checks still to do |
+| [Decisions](docs/DECISIONS.md) | Why each piece works the way it does (001–051) |
+| [Pi Harness guide](docs/PI_HARNESS_GUIDE.md) | Setup and the change loop for coding agents |
 | [AGENTS.md](AGENTS.md) | Rules Pi Harness (and other agents) follow in this repo |
 
 `reference/swift-prototype/` holds the earlier SwiftUI version (named SkillDock), used as a behavior reference.
