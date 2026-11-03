@@ -1,11 +1,12 @@
 # Loadout — Design guide (GPUI + GPUI Kit)
 
-Calm, fast, native-feeling. The palette should feel like Spotlight or Raycast; the popup like a system menu extra.
+Calm, fast, native-feeling. The palette should feel like Spotlight or Raycast; the menu like a system menu extra; Settings like
+a macOS settings window (Rex's: sidebar of colored icons, grouped cards).
 When in doubt, remove it.
 
 ## Rules
 
-1. **One primary action per view.** Palette: Return = install. Popup: Update all (only when updates exist).
+1. **One primary action per view.** Palette: Return = install. Settings → Skills: Update All (only when updates exist).
    Nothing else looks primary.
 2. **Explain selections, not chrome.** No decorative titles. The palette's section labels (Suggested, Loadouts, Other)
    exist only because they explain *why* something is pre-selected.
@@ -33,10 +34,13 @@ When in doubt, remove it.
 | Palette row | 40 px, radius 10, 26 px tile, 14 px name, 13 px muted source (up to 340 px) on the right |
 | Palette bar | 52 px: status or safety notice on the left, capsule (main action ↩ · Actions ⌘K) on the right |
 | Actions menu (⌘K) | 320 px, radius 12, popover color, 32 px items with keycaps, above the capsule |
-| Popup | 400 px wide, padding 14, height follows content (4–7 rows) |
-| Popup row | 44 px, padding 8, radius 10, 26 px tile |
-| Input (popup) | 30 px, fully rounded, faint foreground wash |
-| Lists | palette: what fits in 475 pt (about 7 rows); popup: 4–7 rows; then scroll |
+| Menu | 290 px wide: 54 px header (34 px app icon, name, status dot), info rows, 28 px items with shortcuts on the right |
+| Settings window | 800 × 600 (min 700 × 480), transparent titlebar; 220 px sidebar (theme sidebar colors), 30 px items with 20 px colored icon squares |
+| Settings card | radius 10, faint foreground wash, hairline dividers; 44 px rows: label + 11 px hint left, control right |
+| Shortcut key | 160 × 24 gray box, centered keys (Rex) |
+| Settings list row | 44 px, padding 8, radius 10, 26 px tile |
+| Paste field (Skills) | 34 px, fully rounded, faint foreground wash |
+| Lists | palette: what fits in 475 pt (about 7 rows); Settings pages scroll as a whole |
 | Gaps | 6 / 8 / 10 / 12 px |
 
 ## Type
@@ -84,11 +88,11 @@ project has an update. The octopus from `reference/images-prototype/loadout-menu
 | Pinned | pin, muted |
 | Safety findings (first install) | shield-alert, warning color, tooltip "Includes scripts" |
 | Loadout with preferred agent | small agent badge or muted text |
-| Hover (popup, no update) | x remove |
+| Hover (Settings → Skills, no update) | x remove |
 
 ## Wireframes
 
-See `PRODUCT.md` → Screens for the palette and popup.
+See `PRODUCT.md` → Screens for the palette, the menu, and Settings.
 
 Safety notice (inline in the palette, above the footer):
 ```

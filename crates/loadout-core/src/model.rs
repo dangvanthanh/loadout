@@ -84,6 +84,80 @@ pub struct Settings {
     /// `launch::launcher`'s defaults.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub launchers: BTreeMap<String, String>,
+    /// Which app icon variant the Dock and the app's own headers show.
+    #[serde(deserialize_with = "or_default")]
+    pub app_icon: AppIcon,
+    /// Where Loadout's icon appears.
+    #[serde(deserialize_with = "or_default")]
+    pub icon_place: IconPlace,
+    /// Open the Settings window when Loadout starts.
+    pub show_window_on_launch: bool,
+}
+
+/// A value from a newer Loadout falls back to the default instead of failing all of data.json.
+fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(T::deserialize(value).unwrap_or_default())
+}
+
+/// App icon variants (Settings → Interface).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppIcon {
+    #[default]
+    Default,
+    Twilight,
+    Graphite,
+}
+
+impl AppIcon {
+    pub const ALL: [AppIcon; 3] = [AppIcon::Default, AppIcon::Twilight, AppIcon::Graphite];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AppIcon::Default => "Default",
+            AppIcon::Twilight => "Twilight",
+            AppIcon::Graphite => "Graphite",
+        }
+    }
+}
+
+/// Where Loadout's icon shows. Without the menu bar icon, ⌃⌥L and the Dock still reach it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum IconPlace {
+    #[default]
+    MenuBar,
+    DockAndMenuBar,
+    Dock,
+}
+
+impl IconPlace {
+    pub const ALL: [IconPlace; 3] = [
+        IconPlace::MenuBar,
+        IconPlace::DockAndMenuBar,
+        IconPlace::Dock,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            IconPlace::MenuBar => "Menu bar",
+            IconPlace::DockAndMenuBar => "Dock and menu bar",
+            IconPlace::Dock => "Dock",
+        }
+    }
+
+    pub fn in_dock(self) -> bool {
+        self != IconPlace::MenuBar
+    }
+
+    pub fn in_menu_bar(self) -> bool {
+        self != IconPlace::Dock
+    }
 }
 
 impl Default for Settings {
@@ -97,6 +171,9 @@ impl Default for Settings {
             digest_interval_hours: 24,
             launch_after_install: false,
             launchers: BTreeMap::new(),
+            app_icon: AppIcon::Default,
+            icon_place: IconPlace::MenuBar,
+            show_window_on_launch: false,
         }
     }
 }
@@ -661,6 +738,32 @@ mod tests {
         state.set_loadout_tags(web, vec!["nextjs".into()]);
         assert_eq!(state.loadout_tags(web), ["nextjs"]);
         assert!(state.loadout_tags(Uuid::new_v4()).is_empty());
+    }
+
+    #[test]
+    fn interface_settings_default_and_survive_unknown_values() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            (settings.app_icon, settings.icon_place),
+            (AppIcon::Default, IconPlace::MenuBar)
+        );
+        assert!(!settings.show_window_on_launch);
+        let json =
+            r#"{"appIcon": "twilight", "iconPlace": "dockAndMenuBar", "showWindowOnLaunch": true}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            (settings.app_icon, settings.icon_place),
+            (AppIcon::Twilight, IconPlace::DockAndMenuBar)
+        );
+        assert!(settings.show_window_on_launch);
+        // A value from a newer Loadout falls back instead of failing the whole file.
+        let settings: Settings =
+            serde_json::from_str(r#"{"appIcon": "neon", "iconPlace": "touchBar"}"#).unwrap();
+        assert_eq!(
+            (settings.app_icon, settings.icon_place),
+            (AppIcon::Default, IconPlace::MenuBar)
+        );
+        assert!(IconPlace::Dock.in_dock() && !IconPlace::Dock.in_menu_bar());
     }
 
     #[test]

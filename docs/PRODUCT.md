@@ -59,7 +59,7 @@ Who it's for: developers who use coding agents (Pi, Claude Code, Cursor, Codex, 
 Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built under the old name SkillDock).
 
 ### M0 — Foundation
-- ✅ GPUI + GPUI Kit app, menu bar icon, popup under the icon, no Dock icon
+- ✅ GPUI + GPUI Kit app, menu bar icon, menu under the icon, optional Dock icon
 - ✅ Global hotkey ⌃⌥L opens a palette window
 - ✅ Frontmost Finder/editor folder detection (spike for U1)
 - ✅ App bundle, notifications, open at login
@@ -91,7 +91,7 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 ### M5 — Team, digest, polish and release
 - ✅ Shared team loadouts with versioning (U10)
 - ✅ Idle “what changed” digest (U11)
-- ✅ Popup window parity (projects menu, Global target, settings)
+- ✅ Menu + Settings window (Interface, Shortcuts, Integrations, Notifications, Skills, Loadouts, Projects, History)
 - ✅ Uninstall from a project, GitHub token in Keychain, keyboard navigation
 - ✅ Icon, universal build, release script, Homebrew cask template
 - ⬜ Developer ID signing + notarization run, published cask (needs the owner's Apple account; DECISIONS 046)
@@ -124,29 +124,55 @@ Basic flows exist in the SwiftUI prototype (`reference/swift-prototype/`, built 
 - Actions ⌘K lists every action for the highlighted row with its shortcut, like Tinycast.
 - Section labels here are the one exception to "no section titles": they explain *why* something is selected.
 
-### Menu bar popup — 400 pt, for glancing and managing
+### Menu bar menu — 290 pt, for glancing (like Rex's)
 
 ```
-┌──────────────────────────────────────────┐
-│ Into: shop-dashboard ⌄                   │
-│ ┌──────────────────────────────────────┐ │
-│ │ + Paste a link or owner/repo         │ │
-│ └──────────────────────────────────────┘ │
-│ Added pdf                                │
-│ frontend-design                 Update   │
-│ anthropics/skills · frontend             │
-│ tdd                                   📌 │
-│ mattpocock/skills · testing              │
-│ • 1 update available         Update all  │
-├──────────────────────────────────────────┤
-│ Checked 4 minutes ago               ↻  ⚙ │
-└──────────────────────────────────────────┘
+╭──────────────────────────────────╮
+│ [🐙] Loadout                    › │
+│      • 1 update available         │
+├──────────────────────────────────┤
+│ Into     shop-dashboard           │
+│ Version  0.1.0                    │
+├──────────────────────────────────┤
+│ Open Palette               ⌃⌥L   │
+│ Update All (1)              ⌘U   │
+│ Check for Updates…   4 min ago   │
+│ Settings…                   ⌘,   │
+├──────────────────────────────────┤
+│ Quit Loadout                ⌘Q   │
+╰──────────────────────────────────╯
 ```
 
-- Installing happens in the palette; the popup adds and manages favorites, shows updates and what changed, and
-  holds loadouts, history, output, and settings (⚙ menu) in its list area.
+### Settings — a window with a sidebar (like Rex's)
 
-### Row interactions (both surfaces)
+```
+╭───────────────┬──────────────────────────────────────────────╮
+│ ● ● ●         │ Interface                                    │
+│ [🐙] Loadout  │ App Icon                                     │
+│  • Up to date │ ┌──────────────────────────────────────────┐ │
+│               │ │ [Default]   [Twilight]   [Graphite]      │ │
+│ ▣ Interface   │ │ Show app icon              Menu bar ⌄    │ │
+│ ⌘ Shortcuts   │ └──────────────────────────────────────────┘ │
+│ ◎ Integrations│ Startup                                      │
+│ ♪ Notifications│ ┌──────────────────────────────────────────┐ │
+│               │ │ Show window on launch               ( )  │ │
+│ ▤ Skills    1 │ │ Open at login                       ( )  │ │
+│ ≡ Loadouts    │ └──────────────────────────────────────────┘ │
+│ ▭ Projects    │                                              │
+│ ◷ History     │                                              │
+╰───────────────┴──────────────────────────────────────────────╯
+```
+
+- **Interface:** app icon variant, where the icon shows (menu bar / Dock and menu bar / Dock), show window on
+  launch, open at login.
+- **Shortcuts:** filterable list; click the palette shortcut to record a new one.
+- **Integrations:** coding agents (check any number), open the agent after installing, a launch command per
+  checked agent, GitHub token.
+- **Notifications:** automatic checks, the update digest, a test notification.
+- **Skills:** paste to add favorites; the list, what changed, Update All. **Loadouts:** edit, share, import.
+  **Projects:** where installs go, add, reveal, forget. **History:** provenance and `skills` output.
+
+### Row interactions (palette and Settings)
 Click: toggle. Click name: preview. Right-click: Install only this / Update · What changed · Diff against loadout · Pin · Tags… · Copy install command · Rename… · Remove · View provenance.
 
 ## Copy rules

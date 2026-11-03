@@ -112,9 +112,31 @@ pub fn resolve(text: &str) -> Option<&'static Agent> {
         .find(|a| a.id == wanted || a.name.to_lowercase().replace(' ', "-") == wanted)
 }
 
+/// `list` with `id` added (at the end) or removed, as `Settings.agents` text.
+pub fn toggle(list: &str, id: &str) -> String {
+    let mut ids = parse_list(list);
+    match ids.iter().position(|existing| existing == id) {
+        Some(index) => {
+            ids.remove(index);
+        }
+        None => ids.push(id.to_string()),
+    }
+    ids.join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toggles_agents_in_a_list() {
+        assert_eq!(toggle("", "pi"), "pi");
+        assert_eq!(toggle("claude-code", "cursor"), "claude-code, cursor");
+        assert_eq!(toggle("claude-code, cursor", "claude-code"), "cursor");
+        assert_eq!(toggle("pi", "pi"), "");
+        // Ids Loadout doesn't know survive.
+        assert_eq!(toggle("mystery,pi", "pi"), "mystery");
+    }
 
     #[test]
     fn resolves_ids_and_names() {

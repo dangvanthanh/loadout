@@ -8,7 +8,9 @@ use loadout_core::context::{self as signals, Context as Signals};
 use loadout_core::diff::{self, Changes};
 use loadout_core::installed::{self, Installed};
 use loadout_core::installer::{self, InstallError};
-use loadout_core::model::{Added, Favorite, Pending, ProvenanceEntry, SavedState, Uuid};
+use loadout_core::model::{
+    Added, AppIcon, Favorite, IconPlace, Pending, ProvenanceEntry, SavedState, Settings, Uuid,
+};
 use loadout_core::safety::{self, Report};
 use loadout_core::share::SharedLoadout;
 use loadout_core::stack::{self, StackTag};
@@ -57,8 +59,9 @@ pub struct AppState {
     data_path: Option<PathBuf>,
     pub target: Target,
     pub login_item: LoginItem,
-    /// Last popup status line, e.g. why open at login failed.
-    pub popup_notice: Option<SharedString>,
+    /// The latest status line for the menu and Settings, e.g. "Added pdf" or why open at login
+    /// failed. Cleared when they close or the Settings page changes.
+    pub notice: Option<SharedString>,
     /// Output of `skills` runs, newest last.
     pub log: Vec<SharedString>,
     pub installing: bool,
@@ -72,7 +75,7 @@ pub struct AppState {
     /// Unix seconds.
     pub last_checked: Option<u64>,
     pub check_error: Option<SharedString>,
-    /// What changed in the update the popup is showing.
+    /// What changed in the update Settings is showing.
     pub what_changed: Option<WhatChanged>,
     /// Files + safety findings per favorite, for first-install glances and previews (session).
     pub scans: HashMap<Uuid, Scan>,
@@ -85,7 +88,7 @@ pub struct AppState {
     /// limit from 60 to 5,000 requests an hour.
     pub token: Option<String>,
     _token: Option<Task<()>>,
-    /// A loadout from a link or file, waiting for Import in the popup.
+    /// A loadout from a link or file, waiting for Import in Settings → Loadouts.
     pub pending_import: Option<SharedLoadout>,
     _share: Option<Task<()>>,
     _scans: Vec<Task<()>>,
@@ -134,7 +137,7 @@ pub struct SafetyNotice {
     pub text: SharedString,
 }
 
-/// One pending update's changes, for the popup.
+/// One pending update's changes, for Settings → Skills.
 pub struct WhatChanged {
     pub favorite: Uuid,
     pub installed: String,
@@ -187,7 +190,7 @@ impl Global for GlobalAppState {}
 
 impl AppState {
     pub fn new() -> Self {
-        let mut popup_notice = None;
+        let mut notice = None;
         let path = storage::data_path();
         let prototype = storage::prototype_path();
         let (data, data_path) = match path
@@ -196,14 +199,14 @@ impl AppState {
         {
             Some(Ok(loaded)) => {
                 if let Some(storage::LoadNote::RecoveredCorrupt { backup }) = &loaded.note {
-                    popup_notice = Some(
+                    notice = Some(
                         format!("Couldn't read data.json. Kept it as {}.", backup.display()).into(),
                     );
                 }
                 (loaded.state, path)
             }
             Some(Err(err)) => {
-                popup_notice = Some(format!("{err}. Changes won't be saved.").into());
+                notice = Some(format!("{err}. Changes won't be saved.").into());
                 (SavedState::default(), None)
             }
             None => (SavedState::default(), None),
@@ -213,7 +216,7 @@ impl AppState {
             data_path,
             target: Target::default(),
             login_item: login_item::status(),
-            popup_notice,
+            notice,
             log: Vec::new(),
             installing: false,
             install_status: None,
@@ -243,7 +246,7 @@ impl AppState {
     fn save(&mut self) {
         let Some(path) = &self.data_path else { return };
         if let Err(err) = storage::save(path, &self.data) {
-            self.popup_notice = Some(err.to_string().into());
+            self.notice = Some(err.to_string().into());
         }
     }
 
@@ -916,7 +919,7 @@ impl AppState {
     pub fn rename_loadout(&mut self, id: Uuid, name: &str, cx: &mut Context<Self>) {
         match self.data.rename_loadout(id, name) {
             Ok(()) => self.save(),
-            Err(err) => self.popup_notice = Some(err.to_string().into()),
+            Err(err) => self.notice = Some(err.to_string().into()),
         }
         cx.notify();
     }
@@ -935,7 +938,7 @@ impl AppState {
             text => match agents::resolve(text) {
                 Some(agent) => Some(agent.id.to_string()),
                 None => {
-                    self.popup_notice =
+                    self.notice =
                         Some("Unknown agent. Try pi, claude-code, cursor, or codex.".into());
                     cx.notify();
                     return;
@@ -951,14 +954,14 @@ impl AppState {
     pub fn toggle_loadout_favorite(&mut self, id: Uuid, favorite: Uuid, cx: &mut Context<Self>) {
         match self.data.toggle_loadout_favorite(id, favorite) {
             Ok(()) => self.save(),
-            Err(err) => self.popup_notice = Some(err.to_string().into()),
+            Err(err) => self.notice = Some(err.to_string().into()),
         }
         cx.notify();
     }
 
     pub fn remove_loadout(&mut self, id: Uuid, cx: &mut Context<Self>) {
         if let Some(loadout) = self.data.remove_loadout(id) {
-            self.popup_notice = Some(format!("Removed {}", loadout.name).into());
+            self.notice = Some(format!("Removed {}", loadout.name).into());
             self.save();
             cx.notify();
         }
@@ -971,14 +974,14 @@ impl AppState {
         })
     }
 
-    /// Validates a shared loadout and holds it for the popup's import preview.
+    /// Validates a shared loadout and holds it for the import preview in Settings.
     pub fn offer_import(&mut self, text: &str, cx: &mut Context<Self>) {
         match share::parse(text) {
             Ok(shared) => {
                 self.pending_import = Some(shared);
-                self.popup_notice = None;
+                self.notice = None;
             }
-            Err(err) => self.popup_notice = Some(err.to_string().into()),
+            Err(err) => self.notice = Some(err.to_string().into()),
         }
         cx.notify();
     }
@@ -1000,7 +1003,7 @@ impl AppState {
         } else {
             "Imported"
         };
-        self.popup_notice = Some(format!("{verb} {}{skills}", imported.name).into());
+        self.notice = Some(format!("{verb} {}{skills}", imported.name).into());
         self.save();
         cx.notify();
     }
@@ -1014,7 +1017,7 @@ impl AppState {
         else {
             return;
         };
-        self.popup_notice = Some(format!("Checking {name}…").into());
+        self.notice = Some(format!("Checking {name}…").into());
         cx.notify();
         let task = cx
             .background_executor()
@@ -1022,7 +1025,7 @@ impl AppState {
         self._share = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
-                this.popup_notice = match result {
+                this.notice = match result {
                     Ok(shared) => match share::version_change(&this.data, &shared) {
                         share::VersionChange::Newer | share::VersionChange::New => {
                             this.pending_import = Some(shared);
@@ -1048,7 +1051,7 @@ impl AppState {
     pub fn set_loadout_version(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
         let version = text.trim();
         if version.chars().any(char::is_control) || version.chars().count() > 80 {
-            self.popup_notice = Some("That version has characters Loadout can't keep.".into());
+            self.notice = Some("That version has characters Loadout can't keep.".into());
         } else if let Some(loadout) = self.data.loadouts.iter_mut().find(|l| l.id == id) {
             loadout.version = (!version.is_empty()).then(|| version.to_string());
             self.save();
@@ -1060,7 +1063,7 @@ impl AppState {
     pub fn set_loadout_source(&mut self, id: Uuid, text: &str, cx: &mut Context<Self>) {
         let url = text.trim();
         if !url.is_empty() && !share::is_https(url) {
-            self.popup_notice = Some(share::ShareError::NotHttps.to_string().into());
+            self.notice = Some(share::ShareError::NotHttps.to_string().into());
         } else if let Some(loadout) = self.data.loadouts.iter_mut().find(|l| l.id == id) {
             loadout.source = (!url.is_empty()).then(|| url.to_string());
             self.save();
@@ -1079,7 +1082,7 @@ impl AppState {
             return;
         };
         cx.write_to_clipboard(ClipboardItem::new_string(share::to_link(&shared)));
-        self.popup_notice = Some(format!("Copied a link to {}", shared.name).into());
+        self.notice = Some(format!("Copied a link to {}", shared.name).into());
         cx.notify();
     }
 
@@ -1099,7 +1102,7 @@ impl AppState {
             };
             let written = std::fs::write(&path, share::to_json(&shared));
             this.update(cx, |this, cx| {
-                this.popup_notice = Some(match written {
+                this.notice = Some(match written {
                     Ok(()) => {
                         cx.reveal_path(&path);
                         format!(
@@ -1116,7 +1119,7 @@ impl AppState {
         }));
     }
 
-    /// Asks for a `.loadout.json` and previews it in the popup.
+    /// Asks for a `.loadout.json` and previews it in Settings.
     pub fn import_file(&mut self, cx: &mut Context<Self>) {
         cx.activate(true);
         let chosen = cx.prompt_for_paths(PathPromptOptions {
@@ -1322,7 +1325,7 @@ impl AppState {
     pub fn set_pinned(&mut self, favorite: Uuid, pinned: bool, cx: &mut Context<Self>) {
         if self.data.set_pinned(favorite, pinned) {
             let name = self.favorite_name(favorite);
-            self.popup_notice = Some(
+            self.notice = Some(
                 if pinned {
                     format!("Pinned {name}")
                 } else {
@@ -1342,7 +1345,7 @@ impl AppState {
             return;
         };
         if self.data.ignore_update(favorite, &latest) {
-            self.popup_notice =
+            self.notice =
                 Some(format!("Ignored this update to {}", self.favorite_name(favorite)).into());
             self.save();
             self.refresh_badge(cx);
@@ -1412,7 +1415,7 @@ impl AppState {
             this.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
-                        this.popup_notice = Some(
+                        this.notice = Some(
                             if token.is_empty() {
                                 "Removed the GitHub token"
                             } else {
@@ -1423,7 +1426,7 @@ impl AppState {
                         this.token = (!token.is_empty()).then_some(token);
                         this.check_error = None;
                     }
-                    Err(err) => this.popup_notice = Some(err.into()),
+                    Err(err) => this.notice = Some(err.into()),
                 }
                 cx.notify();
             })
@@ -1446,9 +1449,73 @@ impl AppState {
     }
 
     /// Agents passed with `-a`, e.g. "claude-code, cursor"; empty lets the CLI detect them.
-    pub fn set_agents(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.data.settings.agents = agents::parse_list(text).join(", ");
+    /// Adds or removes one agent from the `-a` list (Settings → Integrations).
+    pub fn toggle_agent(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.data.settings.agents = agents::toggle(&self.data.settings.agents, id);
         self.save();
+        cx.notify();
+    }
+
+    /// A custom launch command for `agent` (`{dir}` = the project); empty restores the default.
+    pub fn set_launcher(&mut self, agent: &str, command: &str, cx: &mut Context<Self>) {
+        let command = command.trim();
+        if command.is_empty() {
+            self.data.settings.launchers.remove(agent);
+        } else {
+            self.data
+                .settings
+                .launchers
+                .insert(agent.to_string(), command.to_string());
+        }
+        self.save();
+        cx.notify();
+    }
+
+    pub fn set_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
+        self.data.settings.app_icon = icon;
+        self.save();
+        Self::apply_interface(&self.data.settings.clone(), cx);
+        cx.notify();
+    }
+
+    pub fn set_icon_place(&mut self, place: IconPlace, cx: &mut Context<Self>) {
+        self.data.settings.icon_place = place;
+        self.save();
+        Self::apply_interface(&self.data.settings.clone(), cx);
+        cx.notify();
+    }
+
+    pub fn set_show_window_on_launch(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.data.settings.show_window_on_launch = on;
+        self.save();
+        cx.notify();
+    }
+
+    /// Dock icon, its image, and the menu bar item, from the Interface settings.
+    pub fn apply_interface(settings: &Settings, cx: &mut App) {
+        let place = settings.icon_place;
+        cx.set_activation_policy(if place.in_dock() {
+            ActivationPolicy::Regular
+        } else {
+            ActivationPolicy::Accessory
+        });
+        if place.in_dock() {
+            mac::dock::set_icon(crate::assets::dock_icon_bytes(settings.app_icon));
+        }
+        if let Some(tray) = cx.try_global::<Tray>() {
+            tray.set_visible(place.in_menu_bar());
+        }
+    }
+
+    /// Copies `npx skills add …` for `favorite` into the target, for running it by hand.
+    pub fn copy_install_command(&mut self, favorite: Uuid, cx: &mut Context<Self>) {
+        let Some(fav) = self.data.favorites.iter().find(|f| f.id == favorite) else {
+            return;
+        };
+        let command = self.command_for(fav, self.data.settings.global);
+        let name = fav.name.clone();
+        cx.write_to_clipboard(ClipboardItem::new_string(command));
+        self.notice = Some(format!("Copied the install command for {name}").into());
         cx.notify();
     }
 
@@ -1524,7 +1591,7 @@ impl AppState {
             };
             this.update(cx, |this, cx| this.choose_target(Some(folder), cx))
                 .ok();
-            cx.update(crate::windows::show_popup);
+            cx.update(|cx| crate::windows::open_settings(None, cx));
         }));
     }
 
@@ -1648,17 +1715,17 @@ impl AppState {
     }
 
     pub fn set_open_at_login(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.popup_notice = None;
+        self.notice = None;
         match login_item::set(on) {
             Ok(status) => {
                 self.login_item = status;
                 if status == LoginItem::NeedsApproval {
-                    self.popup_notice =
+                    self.notice =
                         Some("Allow Loadout in System Settings → General → Login Items.".into());
                 }
             }
             Err(err) => {
-                self.popup_notice = Some(if mac::is_bundled() {
+                self.notice = Some(if mac::is_bundled() {
                     format!("Couldn't change open at login. {err}").into()
                 } else {
                     "Open at login needs Loadout.app. Run packaging/bundle.sh --install.".into()
@@ -1669,7 +1736,7 @@ impl AppState {
     }
 
     pub fn send_test_notification(&mut self, cx: &mut Context<Self>) {
-        self.popup_notice = (!mac::is_bundled())
+        self.notice = (!mac::is_bundled())
             .then(|| "Notifications need Loadout.app. Run packaging/bundle.sh --install.".into());
         cx.show_system_notification(SystemNotification {
             tag: "test".into(),
@@ -1692,7 +1759,7 @@ impl AppState {
             return;
         }
         if ui_skills::is_ui_skills_url(&text) {
-            self.popup_notice = Some("Reading ui-skills.com…".into());
+            self.notice = Some("Reading ui-skills.com…".into());
             cx.notify();
             let task = cx
                 .background_executor()
@@ -1703,11 +1770,11 @@ impl AppState {
                     match result {
                         Ok(Some(favorite)) => this.add_favorites(vec![favorite]),
                         Ok(None) => {
-                            this.popup_notice =
+                            this.notice =
                                 Some("Couldn't find the repo on that ui-skills.com page.".into())
                         }
                         Err(_) => {
-                            this.popup_notice =
+                            this.notice =
                                 Some("Couldn't load ui-skills.com. Check your connection.".into())
                         }
                     }
@@ -1719,7 +1786,7 @@ impl AppState {
         }
         let parsed = parser::parse(&text);
         if parsed.is_empty() {
-            self.popup_notice = Some(
+            self.notice = Some(
                 "Couldn't read that. Paste owner/repo, a GitHub or skills.sh link, or an npx skills add command."
                     .into(),
             );
@@ -1731,7 +1798,7 @@ impl AppState {
 
     fn add_favorites(&mut self, favorites: Vec<Favorite>) {
         let Added { added, skipped } = self.data.add_favorites(favorites);
-        self.popup_notice = Some(match (added.as_slice(), skipped.as_slice()) {
+        self.notice = Some(match (added.as_slice(), skipped.as_slice()) {
             ([one], _) => format!("Added {one}").into(),
             ([], [one]) => format!("{one} is already a favorite").into(),
             ([], _) => "Already favorites".into(),
@@ -1756,7 +1823,7 @@ impl AppState {
 
     pub fn remove_favorite(&mut self, id: Uuid, cx: &mut Context<Self>) {
         if let Some(favorite) = self.data.remove_favorite(id) {
-            self.popup_notice = Some(format!("Removed {}", favorite.name).into());
+            self.notice = Some(format!("Removed {}", favorite.name).into());
             self.save();
             self.refresh_badge(cx);
             cx.notify();

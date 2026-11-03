@@ -21,7 +21,7 @@ Developer ID-signed, notarized build and a published Homebrew cask ([DECISIONS 0
 | [Product](docs/PRODUCT.md) | Positioning, unique features U1–U11, screens, copy rules |
 | [Competitors](docs/COMPETITORS.md) | Similar apps, feature overlap, what we leave to them |
 | [Architecture](docs/ARCHITECTURE.md) | Crates, modules, data model, flows, dependencies |
-| [Design](docs/DESIGN.md) | Palette and popup UI rules for GPUI Kit |
+| [Design](docs/DESIGN.md) | Palette, menu, and Settings UI rules for GPUI Kit |
 | [Plan](docs/PLAN.md) | Milestones M0–M5, unique features first |
 | [Decisions](docs/DECISIONS.md) | Why Rust + GPUI, the narrow positioning, the name, Pi Harness |
 | [AGENTS.md](AGENTS.md) | Rules Pi Harness (and other agents) follow in this repo |
@@ -55,9 +55,10 @@ app like Skills Manager or SkillDeck.
   ↑↓ move · Space or Tab select · **Return** installs · **⌘↩** installs and opens your agent · ⌘Y previews a
   skill · ⌘S saves the selection as a loadout · ⌘D diffs against the highlighted loadout · ⌘P picks the project
   or Global · ⌘⌫ (twice) uninstalls · Esc closes.
-- **The menu bar octopus** opens the popup: paste a link, `owner/repo`, or `npx skills add …` to add a favorite;
-  see updates (the octopus gets a dot), what changed, history, loadouts, and settings (⌘,).
-- Share a loadout from its right-click menu (link or `.loadout.json`); opening one shows a preview before anything
+- **The menu bar octopus** opens a small menu: status, Open Palette, Update All, Check for Updates…, Settings… (⌘,).
+- **Settings** manages everything: add skills (paste a link, `owner/repo`, or `npx skills add …`), loadouts,
+  projects, history, coding agents, shortcuts, notifications, and the app icon (menu bar, Dock, or both).
+- Share a loadout from its right-click menu in Settings → Loadouts (link or `.loadout.json`); opening one shows a preview before anything
   changes.
 
 The first time, macOS asks to let Loadout read Finder (Automation) and editor windows (Accessibility). Without

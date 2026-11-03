@@ -14,6 +14,7 @@ pub mod project;
 pub mod provenance;
 pub mod safety;
 pub mod share;
+pub mod shortcut;
 pub mod stack;
 pub mod storage;
 pub mod tags;

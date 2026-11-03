@@ -5,8 +5,9 @@ use gpui_kit::*;
 use crate::macos::{self, frontmost};
 use crate::state::{AppState, GlobalAppState};
 use crate::tray::Tray;
+use crate::views::menu::{self, Menu};
 use crate::views::palette::{self, Palette};
-use crate::views::popup::{self, Popup};
+use crate::views::settings::{Page, SettingsWindow};
 
 #[derive(Default)]
 struct PaletteWindow(Option<AnyWindowHandle>);
@@ -73,70 +74,61 @@ fn open_palette(state: Entity<AppState>, cx: &mut App) -> Result<AnyWindowHandle
 }
 
 #[derive(Default)]
-struct PopupWindow {
+struct MenuWindow {
     handle: Option<AnyWindowHandle>,
     blurred_at: Option<Instant>,
 }
 
-impl Global for PopupWindow {}
+impl Global for MenuWindow {}
 
-/// A click on the icon first blurs (and closes) the popup; that same click must not reopen it.
+/// A click on the icon first blurs (and closes) the menu; that same click must not reopen it.
 const REOPEN_GUARD: Duration = Duration::from_millis(400);
 
-/// Toggles the popup under the menu bar icon.
-pub fn toggle_popup(cx: &mut App) {
-    let popup = cx.default_global::<PopupWindow>();
-    let recently_blurred = popup
+/// Toggles the menu under the menu bar icon.
+pub fn toggle_menu(cx: &mut App) {
+    let menu = cx.default_global::<MenuWindow>();
+    let recently_blurred = menu
         .blurred_at
         .take()
         .is_some_and(|at| at.elapsed() < REOPEN_GUARD);
-    if let Some(handle) = popup.handle.take()
-        && handle
-            .update(cx, |_, window, _| window.remove_window())
-            .is_ok()
-    {
+    if close_menu(cx) || recently_blurred {
         return;
     }
-    if recently_blurred {
-        return;
-    }
-    match open_popup(cx) {
-        Ok(handle) => cx.default_global::<PopupWindow>().handle = Some(handle),
-        Err(err) => eprintln!("couldn't open the popup: {err:#}"),
+    match open_menu(cx) {
+        Ok(handle) => cx.default_global::<MenuWindow>().handle = Some(handle),
+        Err(err) => eprintln!("couldn't open the menu: {err:#}"),
     }
 }
 
-/// Shows an import preview for a link or file in the popup.
-pub fn offer_import(text: &str, cx: &mut App) {
-    let state = cx.global::<GlobalAppState>().0.clone();
-    state.update(cx, |state, cx| state.offer_import(text, cx));
-    show_popup(cx);
-}
-
-/// Opens the popup unless it's already open (e.g. from a notification).
-pub fn show_popup(cx: &mut App) {
-    let open = cx
-        .default_global::<PopupWindow>()
+/// Closes the menu; true if it was open.
+pub fn close_menu(cx: &mut App) -> bool {
+    let closed = cx
+        .default_global::<MenuWindow>()
         .handle
-        .is_some_and(|handle| handle.update(cx, |_, _, _| ()).is_ok());
-    if !open {
-        cx.default_global::<PopupWindow>().blurred_at = None;
-        toggle_popup(cx);
+        .take()
+        .is_some_and(|handle| {
+            handle
+                .update(cx, |_, window, _| window.remove_window())
+                .is_ok()
+        });
+    if closed {
+        clear_notice(cx);
     }
+    closed
 }
 
-pub fn popup_blurred(cx: &mut App) {
-    cx.default_global::<PopupWindow>().blurred_at = Some(Instant::now());
-    popup_closed(cx);
+pub fn menu_blurred(cx: &mut App) {
+    cx.default_global::<MenuWindow>().blurred_at = Some(Instant::now());
+    clear_notice(cx);
 }
 
-/// Notices are for the moment they happen; the next popup starts clean.
-pub fn popup_closed(cx: &mut App) {
+/// Notices are for the moment they happen; the next look starts clean.
+pub fn clear_notice(cx: &mut App) {
     let state = cx.global::<GlobalAppState>().0.clone();
-    state.update(cx, |state, _| state.popup_notice = None);
+    state.update(cx, |state, _| state.notice = None);
 }
 
-fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
+fn open_menu(cx: &mut App) -> Result<AnyWindowHandle> {
     let (display_id, icon) = cx
         .global::<Tray>()
         .icon_frame()
@@ -145,11 +137,8 @@ fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
         .find_display(display_id)
         .ok_or_else(|| anyhow::anyhow!("menu bar icon is on an unknown display"))?;
     let state = cx.global::<GlobalAppState>().0.clone();
-    let (favorites, updates) = {
-        let state = state.read(cx);
-        (state.data.favorites.len(), !state.pending().is_empty())
-    };
-    let size = size(popup::WIDTH, popup::height(favorites, updates));
+    let updates = !state.read(cx).pending().is_empty();
+    let size = size(menu::WIDTH, menu::height(updates));
     // Centered under the icon, kept 8 px inside the screen edges.
     let max_x = display.bounds().size.width - size.width - px(8.);
     let x = (icon.center().x - size.width / 2.).max(px(8.)).min(max_x);
@@ -163,13 +152,68 @@ fn open_popup(cx: &mut App) -> Result<AnyWindowHandle> {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        // Frosted glass behind the views' tinted backgrounds, like Tinycast.
+        // Frosted glass behind the view's tinted background, like Tinycast.
         window_background: WindowBackgroundAppearance::Blurred,
         display_id: Some(display_id),
         ..Default::default()
     };
     let (handle, _) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| Popup::new(state, window, cx))
+        cx.new(|cx| Menu::new(state, window, cx))
     })?;
     Ok(handle)
+}
+
+#[derive(Default)]
+struct SettingsWindowHandle(Option<(AnyWindowHandle, WeakEntity<SettingsWindow>)>);
+
+impl Global for SettingsWindowHandle {}
+
+/// Brings up Settings (opening it if needed), on `page` if given.
+pub fn open_settings(page: Option<Page>, cx: &mut App) {
+    close_menu(cx);
+    cx.activate(true);
+    if let Some((handle, view)) = cx.default_global::<SettingsWindowHandle>().0.clone() {
+        let shown = handle.update(cx, |_, window, cx| {
+            window.activate_window();
+            if let Some(page) = page {
+                view.update(cx, |view, cx| view.show_page(page, cx)).ok();
+            }
+        });
+        if shown.is_ok() {
+            return;
+        }
+    }
+    let state = cx.global::<GlobalAppState>().0.clone();
+    let bounds = Bounds::centered(None, size(px(800.), px(600.)), cx);
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Loadout Settings".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(16.), px(18.))),
+        }),
+        kind: WindowKind::Normal,
+        focus: true,
+        show: true,
+        is_resizable: true,
+        is_minimizable: true,
+        window_min_size: Some(size(px(700.), px(480.))),
+        ..Default::default()
+    };
+    let page = page.unwrap_or_default();
+    match gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| SettingsWindow::new(state, page, window, cx))
+    }) {
+        Ok((handle, view)) => {
+            cx.set_global(SettingsWindowHandle(Some((handle, view.downgrade()))));
+        }
+        Err(err) => eprintln!("couldn't open Settings: {err:#}"),
+    }
+}
+
+/// A link or file to import: previewed on Settings → Loadouts.
+pub fn offer_import(text: &str, cx: &mut App) {
+    let state = cx.global::<GlobalAppState>().0.clone();
+    state.update(cx, |state, cx| state.offer_import(text, cx));
+    open_settings(Some(Page::Loadouts), cx);
 }

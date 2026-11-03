@@ -1,51 +1,25 @@
+//! Settings pages that manage things: skills (and what changed), loadouts (and imports).
+//! Moved from the old menu bar popup.
+
 use gpui_kit::assets::IconName as ExtraIcon;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Theme};
+use gpui_kit::component::input::Input;
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use loadout_core::diff::{ChangeKind, LineKind};
-use loadout_core::model::{ProvenanceEntry, Uuid};
-use loadout_core::{provenance, share};
+use loadout_core::model::Uuid;
+use loadout_core::share;
 
-use crate::Quit;
-use crate::state::{AppState, ChangesState, CheckReason};
+use super::{Detail, HistoryFilter, Page, SettingsWindow};
+use crate::state::ChangesState;
 use crate::views::palette::{Glyph, tile, update_pill};
-use crate::views::settings::SettingsView;
-use crate::windows;
 
-const CONTEXT: &str = "Popup";
-/// Wide enough for a name, its source, and the Update pill on one row (DECISIONS 047).
-pub const WIDTH: Pixels = px(400.);
-const PADDING: Pixels = px(14.);
-const INPUT_HEIGHT: Pixels = px(30.);
-const ROW_HEIGHT: Pixels = px(44.);
-const UPDATE_BAR_HEIGHT: Pixels = px(28.);
-const TARGET_HEIGHT: Pixels = px(24.);
-const FOOTER_HEIGHT: Pixels = px(28.);
-const GAP: Pixels = px(8.);
-const MIN_ROWS: usize = 4;
-const MAX_ROWS: usize = 7;
-
-// No Esc binding: bindings run before key listeners, so it would close the popup before
-// `on_key_down` could cancel an edit or leave a view.
-pub fn init(_: &mut App) {}
-
-/// Window height for `favorites` rows: four to seven, then the list scrolls (other views share
-/// the list area). The update bar only when something is pending.
-pub fn height(favorites: usize, updates: bool) -> Pixels {
-    let list = ROW_HEIGHT * favorites.clamp(MIN_ROWS, MAX_ROWS) as f32;
-    let bar = if updates {
-        UPDATE_BAR_HEIGHT + GAP
-    } else {
-        px(0.)
-    };
-    PADDING * 2. + TARGET_HEIGHT + INPUT_HEIGHT + list + bar + px(1.) + FOOTER_HEIGHT + GAP * 4.
-}
+pub(super) const ROW_HEIGHT: Pixels = px(44.);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Field {
+pub(super) enum Field {
     Name,
     Tags,
     LoadoutName,
@@ -55,129 +29,14 @@ enum Field {
     LoadoutSource,
 }
 
-/// What the list area shows.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum View {
-    Favorites,
-    /// Output of `skills` runs.
-    Output,
-    /// A pending update's files and SKILL.md diff.
-    Changes(Uuid),
-    /// Provenance, newest first.
-    History(HistoryFilter),
-    Loadouts,
-    /// One loadout's skills, toggled by clicking.
-    Loadout(Uuid),
-    Settings,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HistoryFilter {
-    All,
-    /// The project last detected.
-    Project,
-    Skill(Uuid),
-}
-
-/// Most history lines shown.
-const HISTORY_LINES: usize = 200;
-
-pub struct Popup {
-    state: Entity<AppState>,
-    paste: Entity<InputState>,
-    edit: Entity<InputState>,
-    editing: Option<(Uuid, Field)>,
-    view: View,
-    /// Made the first time Settings opens.
-    settings: Option<Entity<SettingsView>>,
-    scroll: ScrollHandle,
-    _subscriptions: Vec<Subscription>,
-}
-
-impl Popup {
-    pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let paste =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Paste a link or owner/repo"));
-        let edit = cx.new(|cx| InputState::new(window, cx));
-        paste.update(cx, |paste, cx| paste.focus(window, cx));
-        let _subscriptions = vec![
-            cx.observe(&state, |this, state, cx| {
-                // An update that's no longer pending (updated, pinned, ignored) closes its view.
-                if let View::Changes(id) = this.view
-                    && !state.read(cx).pending().iter().any(|p| p.favorite == id)
-                {
-                    this.view = View::Favorites;
-                }
-                if let View::Loadout(id) = this.view
-                    && state.read(cx).data.loadout(id).is_none()
-                {
-                    this.view = View::Loadouts;
-                }
-                cx.notify();
-            }),
-            cx.subscribe_in(
-                &paste,
-                window,
-                |this, paste, event: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = event {
-                        let text = paste.read(cx).value().to_string();
-                        this.state
-                            .update(cx, |state, cx| state.add_from_text(&text, cx));
-                        paste.update(cx, |paste, cx| paste.set_value("", window, cx));
-                        this.set_view(View::Favorites, cx);
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &edit,
-                window,
-                |this, edit, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => {
-                        let text = edit.read(cx).value().to_string();
-                        if let Some((id, field)) = this.editing.take() {
-                            this.state.update(cx, |state, cx| match field {
-                                Field::Name => state.rename_favorite(id, &text, cx),
-                                Field::Tags => state.set_favorite_tags(id, &text, cx),
-                                Field::LoadoutName => state.rename_loadout(id, &text, cx),
-                                Field::LoadoutTags => state.set_loadout_tags(id, &text, cx),
-                                Field::LoadoutAgent => state.set_loadout_agent(id, &text, cx),
-                                Field::LoadoutVersion => state.set_loadout_version(id, &text, cx),
-                                Field::LoadoutSource => state.set_loadout_source(id, &text, cx),
-                            });
-                        }
-                        this.paste.update(cx, |paste, cx| paste.focus(window, cx));
-                        cx.notify();
-                    }
-                    InputEvent::Blur => {
-                        this.editing = None;
-                        cx.notify();
-                    }
-                    _ => {}
-                },
-            ),
-            cx.observe_window_appearance(window, |_, window, cx| {
-                Theme::sync_system_appearance(Some(window), cx);
-            }),
-            cx.observe_window_activation(window, |_, window, cx| {
-                if !window.is_window_active() {
-                    windows::popup_blurred(cx);
-                    window.remove_window();
-                }
-            }),
-        ];
-        Self {
-            state,
-            paste,
-            edit,
-            editing: None,
-            view: View::Favorites,
-            settings: None,
-            scroll: ScrollHandle::new(),
-            _subscriptions,
-        }
-    }
-
-    fn start_edit(&mut self, id: Uuid, field: Field, window: &mut Window, cx: &mut Context<Self>) {
+impl SettingsWindow {
+    pub(super) fn start_edit(
+        &mut self,
+        id: Uuid,
+        field: Field,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let data = &self.state.read(cx).data;
         let favorite = data.favorites.iter().find(|f| f.id == id);
         let loadout = data.loadout(id);
@@ -199,66 +58,7 @@ impl Popup {
         cx.notify();
     }
 
-    fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
-        if let View::Changes(id) = view {
-            self.state
-                .update(cx, |state, cx| state.show_changes(id, cx));
-        }
-        self.view = view;
-        self.scroll = ScrollHandle::new();
-        if view == View::Output {
-            self.scroll.scroll_to_bottom();
-        }
-        cx.notify();
-    }
-
-    /// Esc cancels an edit, then leaves a secondary view, before it can close the popup.
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let modifiers = event.keystroke.modifiers;
-        if modifiers.platform && !modifiers.shift && !modifiers.alt && !modifiers.control {
-            let handled = match event.keystroke.key.as_str() {
-                "," => {
-                    self.set_view(View::Settings, cx);
-                    true
-                }
-                "l" => {
-                    self.set_view(View::Loadouts, cx);
-                    true
-                }
-                "r" => {
-                    self.state
-                        .update(cx, |s, cx| s.check_for_updates(CheckReason::Manual, cx));
-                    true
-                }
-                "u" => {
-                    self.state.update(cx, |s, cx| s.update(None, cx));
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                cx.stop_propagation();
-            }
-            return;
-        }
-        if event.keystroke.key != "escape" {
-            return;
-        }
-        if self.editing.take().is_some() {
-            self.paste.update(cx, |paste, cx| paste.focus(window, cx));
-        } else if self.state.read(cx).pending_import.is_some() {
-            self.state.update(cx, |state, cx| state.cancel_import(cx));
-        } else if self.view != View::Favorites {
-            self.set_view(View::Favorites, cx);
-        } else {
-            windows::popup_closed(cx);
-            window.remove_window();
-        }
-        cx.stop_propagation();
-        cx.notify();
-    }
-
-    fn render_favorite(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_favorite(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let state = self.state.read(cx);
         let favorite = &state.data.favorites[ix];
@@ -336,9 +136,9 @@ impl Popup {
                     div()
                         .id(("update", ix))
                         .cursor_pointer()
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.set_view(View::Changes(id), cx)),
-                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.go(Page::Skills, Detail::Changes(id), cx)
+                        }))
                         .child(update_pill(cx)),
                 )
             })
@@ -369,6 +169,7 @@ impl Popup {
                     RowAction::Pin(!pinned),
                 ))
                 .item(menu_item("History", RowAction::History))
+                .item(menu_item("Copy install command", RowAction::CopyCommand))
                 .when(installed_here, |menu| {
                     menu.item(menu_item(
                         "Uninstall from this project",
@@ -392,8 +193,14 @@ impl Popup {
         cx: &mut Context<Self>,
     ) {
         match action {
-            RowAction::Changes => self.set_view(View::Changes(id), cx),
-            RowAction::History => self.set_view(View::History(HistoryFilter::Skill(id)), cx),
+            RowAction::Changes => self.go(Page::Skills, Detail::Changes(id), cx),
+            RowAction::History => {
+                self.history = HistoryFilter::Skill(id);
+                self.go(Page::History, Detail::None, cx)
+            }
+            RowAction::CopyCommand => self
+                .state
+                .update(cx, |state, cx| state.copy_install_command(id, cx)),
             RowAction::Uninstall => self.state.update(cx, |state, cx| state.uninstall(id, cx)),
             RowAction::Pin(pinned) => self
                 .state
@@ -406,7 +213,7 @@ impl Popup {
     }
 
     /// Header, places, actions, file list, and SKILL.md diff for one pending update.
-    fn render_changes(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_changes(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
         let state = self.state.read(cx);
         let name = state
@@ -441,7 +248,9 @@ impl Popup {
                         .icon(IconName::ArrowLeft)
                         .tooltip("Back")
                         .accessibility_label("Back")
-                        .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Favorites, cx))),
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.go(Page::Skills, Detail::None, cx)),
+                        ),
                 )
                 .child(
                     div()
@@ -550,87 +359,13 @@ impl Popup {
     }
 }
 
-impl Popup {
-    /// "Into: shop-dashboard ⌄": recent projects, Global, Add project…, Forget.
-    fn render_target(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.state.read(cx);
-        let global = state.data.settings.global;
-        let current = (!global)
-            .then(|| {
-                state
-                    .target
-                    .root
-                    .clone()
-                    .or_else(|| state.recent_projects().into_iter().next())
-            })
-            .flatten();
-        let label: SharedString = match (&current, global) {
-            (_, true) => "Global".into(),
-            (Some(path), false) => folder_name(path).into(),
-            (None, false) => "No project yet".into(),
-        };
-        let projects: Vec<std::path::PathBuf> =
-            state.recent_projects().into_iter().take(10).collect();
-        let entity = self.state.clone();
-        div()
-            .h(TARGET_HEIGHT)
-            .flex()
-            .items_center()
-            .child(
-                Button::new("target")
-                    .ghost()
-                    .xsmall()
-                    .rounded_full()
-                    .icon(IconName::Folder)
-                    .label(label)
-                    .dropdown_caret(true)
-                    .tooltip("Where installs go")
-                    .dropdown_menu(move |menu, _, _| {
-                        let mut menu = menu;
-                        for path in &projects {
-                            let (state, path) = (entity.clone(), path.clone());
-                            let checked = !global && current.as_ref() == Some(&path);
-                            menu = menu.item(
-                                PopupMenuItem::new(folder_name(&path))
-                                    .checked(checked)
-                                    .on_click(move |_, _, cx| {
-                                        state.update(cx, |s, cx| {
-                                            s.choose_target(Some(path.clone()), cx)
-                                        })
-                                    }),
-                            );
-                        }
-                        let (to_global, adder, forget) =
-                            (entity.clone(), entity.clone(), entity.clone());
-                        let current = current.clone();
-                        menu.separator()
-                            .item(
-                                PopupMenuItem::new("Global (home folder)")
-                                    .checked(global)
-                                    .on_click(move |_, _, cx| {
-                                        to_global.update(cx, |s, cx| s.choose_target(None, cx))
-                                    }),
-                            )
-                            .item(
-                                PopupMenuItem::new("Add project…").on_click(move |_, _, cx| {
-                                    adder.update(cx, |s, cx| s.add_project(cx))
-                                }),
-                            )
-                            .when_some(current, |menu, path| {
-                                menu.item(
-                                    PopupMenuItem::new(format!("Forget {}", folder_name(&path)))
-                                        .on_click(move |_, _, cx| {
-                                            forget.update(cx, |s, cx| s.forget_project(&path, cx))
-                                        }),
-                                )
-                            })
-                    }),
-            )
-            .into_any_element()
-    }
-
-    /// A back button and a title, for secondary views.
-    fn view_header(&self, title: SharedString, back: View, cx: &mut Context<Self>) -> AnyElement {
+impl SettingsWindow {
+    pub(super) fn view_header(
+        &self,
+        title: SharedString,
+        back: Page,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .items_center()
@@ -642,7 +377,7 @@ impl Popup {
                     .icon(IconName::ArrowLeft)
                     .tooltip("Back")
                     .accessibility_label("Back")
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_view(back, cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| this.go(back, Detail::None, cx))),
             )
             .child(
                 div()
@@ -657,8 +392,8 @@ impl Popup {
     }
 
     /// Every loadout: click for its skills, right-click to rename, set the agent or tags, remove.
-    fn render_loadouts(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let mut items = vec![self.view_header("Loadouts".into(), View::Favorites, cx)];
+    pub(super) fn render_loadouts(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut items = Vec::new();
         let state = self.state.read(cx);
         let theme = cx.theme();
         if state.data.loadouts.is_empty() {
@@ -736,7 +471,7 @@ impl Popup {
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if this.editing.is_none() {
-                            this.set_view(View::Loadout(id), cx)
+                            this.go(Page::Loadouts, Detail::Loadout(id), cx)
                         }
                     }))
                     .child(
@@ -814,7 +549,7 @@ impl Popup {
     }
 
     /// What a link or file would add, before anything changes.
-    fn render_import(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_import(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let state = self.state.read(cx);
         let Some(shared) = state.pending_import.as_ref() else {
             return Vec::new();
@@ -955,7 +690,11 @@ impl Popup {
     }
 
     /// Every favorite with a check for membership; clicking toggles it.
-    fn render_loadout_members(&self, id: Uuid, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_loadout_members(
+        &self,
+        id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let state = self.state.read(cx);
         let Some(loadout) = state.data.loadout(id) else {
             return Vec::new();
@@ -968,7 +707,7 @@ impl Popup {
             .iter()
             .map(|f| (f.id, f.name.clone(), f.source.clone()))
             .collect();
-        let mut items = vec![self.view_header(title, View::Loadouts, cx)];
+        let mut items = vec![self.view_header(title, Page::Loadouts, cx)];
         for (ix, (favorite, name, source)) in favorites.into_iter().enumerate() {
             let theme = cx.theme();
             let hover = theme.foreground.opacity(0.05);
@@ -1008,101 +747,6 @@ impl Popup {
         }
         items
     }
-
-    /// Back, a title, the project toggle, and one line per entry.
-    fn render_history(&self, filter: HistoryFilter, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let theme = cx.theme();
-        let state = self.state.read(cx);
-        let project = state
-            .data
-            .selected_project_id
-            .and_then(|id| state.data.projects.iter().find(|p| p.id == id))
-            .map(|p| p.path.clone());
-        let skill = match filter {
-            HistoryFilter::Skill(id) => state.data.favorites.iter().find(|f| f.id == id),
-            _ => None,
-        };
-        let entries: Vec<&ProvenanceEntry> = match (filter, &project, skill) {
-            (HistoryFilter::Skill(_), _, Some(favorite)) => {
-                provenance::for_skill(&state.data.provenance, favorite)
-            }
-            (HistoryFilter::Project, Some(path), _) => {
-                provenance::for_project(&state.data.provenance, path)
-            }
-            _ => provenance::recent(&state.data.provenance, usize::MAX),
-        };
-        let title: SharedString = match (filter, &project, skill) {
-            (HistoryFilter::Skill(_), _, Some(favorite)) => {
-                format!("History · {}", favorite.name).into()
-            }
-            (HistoryFilter::Project, Some(path), _) => format!(
-                "History · {}",
-                path.file_name()
-                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-            )
-            .into(),
-            _ => "History".into(),
-        };
-        let toggle = match (filter, project.is_some()) {
-            (HistoryFilter::All, true) => Some(("This project", HistoryFilter::Project)),
-            (HistoryFilter::Project, _) => Some(("All projects", HistoryFilter::All)),
-            _ => None,
-        };
-        let now = provenance::now();
-        let mut items = vec![
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    Button::new("back")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::ArrowLeft)
-                        .tooltip("Back")
-                        .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Favorites, cx))),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(title),
-                )
-                .when_some(toggle, |row, (label, next)| {
-                    row.child(
-                        Button::new("history-filter")
-                            .ghost()
-                            .xsmall()
-                            .label(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_view(View::History(next), cx)
-                            })),
-                    )
-                })
-                .into_any_element(),
-        ];
-        if entries.is_empty() {
-            items.push(
-                div()
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .child("Nothing yet. Installs and updates show up here.")
-                    .into_any_element(),
-            );
-        }
-        items.extend(entries.into_iter().take(HISTORY_LINES).map(|entry| {
-            div()
-                .py(px(1.))
-                .font_family("Menlo")
-                .text_size(px(10.))
-                .child(provenance::describe(entry, now))
-                .into_any_element()
-        }));
-        items
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -1118,204 +762,14 @@ enum LoadoutAction {
 enum RowAction {
     Changes,
     History,
+    CopyCommand,
     Uninstall,
     Pin(bool),
     Edit(Field),
     Remove,
 }
 
-impl Render for Popup {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.view == View::Settings && self.settings.is_none() {
-            let state = self.state.clone();
-            self.settings = Some(cx.new(|cx| SettingsView::new(state, window, cx)));
-        }
-        let count = self.state.read(cx).data.favorites.len();
-        let target = self.render_target(cx);
-        let importing = self.state.read(cx).pending_import.is_some();
-        let items: Vec<AnyElement> = if importing {
-            self.render_import(cx)
-        } else {
-            match self.view {
-                View::Favorites => (0..count).map(|ix| self.render_favorite(ix, cx)).collect(),
-                View::Output => Vec::new(),
-                View::Changes(id) => self.render_changes(id, cx),
-                View::History(filter) => self.render_history(filter, cx),
-                View::Loadouts => self.render_loadouts(cx),
-                View::Loadout(id) => self.render_loadout_members(id, cx),
-                View::Settings => {
-                    let mut items = vec![self.view_header("Settings".into(), View::Favorites, cx)];
-                    items.extend(self.settings.clone().map(|view| view.into_any_element()));
-                    items
-                }
-            }
-        };
-        let theme = cx.theme();
-        let state = self.state.read(cx);
-        let checking = state.checking;
-        let check_status = state.check_status();
-        let pending = state.pending().len();
-        let busy = state.installing;
-        let notice = state
-            .popup_notice
-            .clone()
-            .or_else(|| state.install_status.clone());
-        let has_log = !state.log.is_empty();
-        let has_history = !state.data.provenance.is_empty();
-        let log: Vec<SharedString> = if self.view == View::Output {
-            state.log.clone()
-        } else {
-            Vec::new()
-        };
-        div()
-            .key_context(CONTEXT)
-            .capture_key_down(cx.listener(Self::on_key_down))
-            .size_full()
-            .p(PADDING)
-            .flex()
-            .flex_col()
-            .gap(GAP)
-            // Glass: the window blurs what's behind it; this tint keeps text readable.
-            .bg(theme.background.opacity(0.78))
-            .text_color(theme.foreground)
-            .text_size(px(13.))
-            .child(target)
-            .child(
-                div()
-                    .h(INPUT_HEIGHT)
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .rounded_full()
-                    .bg(theme.foreground.opacity(0.06))
-                    .child(
-                        Input::new(&self.paste)
-                            .appearance(false)
-                            .small()
-                            .prefix(Icon::new(IconName::Plus).text_color(theme.muted_foreground)),
-                    ),
-            )
-            .child(
-                div()
-                    .id("list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .when(self.view == View::Output, |list| {
-                        list.font_family("Menlo")
-                            .text_size(px(10.))
-                            .text_color(theme.muted_foreground)
-                            .children(log.into_iter().map(|line| div().child(line)))
-                    })
-                    .when(!importing && self.view == View::Favorites && count == 0, |list| {
-                        list.text_size(px(12.))
-                            .text_color(theme.muted_foreground)
-                            .child("Paste a GitHub or skills.sh link, owner/repo, or an npx skills add command.")
-                    })
-                    .children(items),
-            )
-            .when(!importing && pending > 0 && self.view == View::Favorites, |popup| {
-                popup.child(
-                    div()
-                        .h(UPDATE_BAR_HEIGHT)
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(px(12.))
-                        .child(div().size(px(6.)).rounded_full().bg(theme.primary))
-                        .child(match pending {
-                            1 => "1 update available".to_string(),
-                            n => format!("{n} updates available"),
-                        })
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("update-all")
-                                .ghost()
-                                .xsmall()
-                                .label("Update all")
-                                .disabled(busy)
-                                .on_click({
-                                    let state = self.state.clone();
-                                    move |_, _, cx| state.update(cx, |state, cx| state.update(None, cx))
-                                }),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .h(FOOTER_HEIGHT)
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(11.))
-                            .text_color(theme.muted_foreground)
-                            // A fresh notice ("Added pdf") wins over the check status.
-                            .children(notice.or(check_status)),
-                    )
-                    .child(
-                        Button::new("check")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::RotateCw)
-                            .tooltip("Check for updates (⌘R)")
-                            .accessibility_label("Check for updates")
-                            .disabled(checking)
-                            .on_click({
-                                let state = self.state.clone();
-                                move |_, _, cx| {
-                                    state.update(cx, |state, cx| {
-                                        state.check_for_updates(CheckReason::Manual, cx)
-                                    })
-                                }
-                            }),
-                    )
-                    .child(
-                        Button::new("settings")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::Settings)
-                            .tooltip("More")
-                            .accessibility_label("More")
-                            .dropdown_menu_with_anchor(Anchor::BottomRight, {
-                                let state = self.state.clone();
-                                let this = cx.entity().downgrade();
-                                move |menu, _, _| {
-                                    let item = |label: &'static str| PopupMenuItem::new(label);
-                                    let view = |label: &'static str, view: View| {
-                                        let this = this.clone();
-                                        item(label).on_click(move |_, _, cx| {
-                                            this.update(cx, |this, cx| this.set_view(view, cx)).ok();
-                                        })
-                                    };
-                                    let importer = state.clone();
-                                    menu.item(view("Loadouts ⌘L", View::Loadouts))
-                                        .item(item("Import loadout file…").on_click(move |_, _, cx| {
-                                            importer.update(cx, |s, cx| s.import_file(cx))
-                                        }))
-                                        .when(has_history, |menu| {
-                                            menu.item(view("History", View::History(HistoryFilter::All)))
-                                        })
-                                        .when(has_log, |menu| menu.item(view("Output", View::Output)))
-                                        .separator()
-                                        .item(view("Settings… ⌘,", View::Settings))
-                                        .item(item("Quit Loadout").on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(Quit), cx)
-                                        }))
-                                }
-                            }),
-                    ),
-            )
-    }
-}
-
-fn folder_name(path: &std::path::Path) -> String {
+pub(super) fn folder_name(path: &std::path::Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),

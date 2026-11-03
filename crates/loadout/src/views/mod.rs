@@ -1,3 +1,3 @@
+pub mod menu;
 pub mod palette;
-pub mod popup;
 pub mod settings;

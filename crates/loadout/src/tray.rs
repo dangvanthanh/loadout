@@ -1,4 +1,4 @@
-//! Menu bar item: an `NSStatusItem` whose clicks toggle the popup (DECISIONS 008).
+//! Menu bar item: an `NSStatusItem` whose clicks toggle the menu (DECISIONS 008).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -62,6 +62,11 @@ impl Tray {
             icon_update,
             _target: target,
         })
+    }
+
+    /// Hides the menu bar item when the user chose Dock only.
+    pub fn set_visible(&self, visible: bool) {
+        self.item.setVisible(visible);
     }
 
     /// Shows the dot when any project has an update.

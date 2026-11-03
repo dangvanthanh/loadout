@@ -1318,7 +1318,7 @@ impl Render for Palette {
                     .px(LIST_PADDING)
                     .when(empty && list_mode, |list| {
                         list.flex().items_center().justify_center().text_size(px(13.)).text_color(muted).child(
-                            "No favorites yet. Paste a link or owner/repo in the menu bar popup.",
+                            "No favorites yet. Add skills in Settings → Skills (⌘, from the menu bar).",
                         )
                     })
                     .when(!empty && visible.is_empty() && list_mode, |list| {

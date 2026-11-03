@@ -7,7 +7,9 @@ A single-process macOS menu bar app in Rust. UI with **GPUI** (Zed's GPU-acceler
 
 Two surfaces:
 - **Palette** (⌃⌥L, 520 pt): the main flow — detect the project you're in, suggest and rank skills for its stack + context, install, optionally launch agent, diff against loadout.
-- **Popup** (menu bar click, 340 pt): glance at updates, manage favorites, view provenance, trigger digest.
+- **Menu** (menu bar click, 290 pt): status, target, version, Open Palette, Update All, Check for Updates…, Settings…, Quit.
+- **Settings** (a normal window with a sidebar): Interface, Shortcuts, Integrations, Notifications, Skills, Loadouts,
+  Projects, History. Managing favorites, loadouts, projects, and history happens here.
 
 Outside dependencies at runtime:
 1. The official **`skills` CLI** (`npx skills add`) performs every install and update.
@@ -19,9 +21,9 @@ flowchart LR
   subgraph app[loadout - GPUI]
     Hotkey[global hotkey] --> Palette[Palette window]
     Front[frontmost: Finder / editor via AX] --> Palette
-    Tray[tray: NSStatusItem] --> Popup[Popup window]
+    Tray[tray: NSStatusItem] --> Menu[Menu window] --> Settings[Settings window]
     Palette --> State[AppState entity]
-    Popup --> State
+    Settings --> State
     State --> Notify[notifications + digest]
   end
   subgraph core[loadout-core - pure Rust]
@@ -46,7 +48,7 @@ flowchart LR
 ## Crates
 
 - **`loadout-core`** — every rule and non-UI side effect: parsing, project/stack/context detection, commands, GitHub, diff, safety/compat, storage, share links, provenance, loadout versioning. No GPUI dependency; `cargo test -p loadout-core` covers most behavior.
-- **`loadout`** — the GPUI binary: palette, popup, tray, hotkey, frontmost-app detection, notifications, login item, agent launch.
+- **`loadout`** — the GPUI binary: palette, menu, Settings window, tray, Dock icon, hotkey, frontmost-app detection, notifications, login item, agent launch.
 
 ## Repository layout
 
@@ -75,6 +77,7 @@ loadout/
       share.rs                    loadout:// links, .loadout.json, team versioning        (U5, U10)
       provenance.rs               append-only local audit log                             (U8)
       digest.rs                   when the digest is due, and its one-line summary        (U11)
+      shortcut.rs                 palette shortcut: spec ↔ ⌃⌥L display ↔ recorded keystroke
       launch.rs                   preferred-agent launch helpers                          (U9)
     loadout-core/tests/fixtures/  projects/, trees/, html/, data/
     loadout/src/
@@ -82,21 +85,23 @@ loadout/
       assets.rs                   GPUI Kit assets + extra icons (icon_assets!)
       state.rs                    AppState entity: data + session + actions
       hotkey.rs                   palette shortcut via global-hotkey (live re-register), polled by a timer
-      tray.rs                     NSStatusItem (objc2), popup toggle, icon state
-      windows.rs                  palette + popup lifecycle, positioning, close on blur
+      tray.rs                     NSStatusItem (objc2), menu toggle, icon state, visibility
+      windows.rs                  palette, menu, and Settings window lifecycle, positioning, close on blur
       views/
         palette.rs                search, Into line, sections, keyboard, equip+launch; in its list area:
                                   skill preview (⌘Y), diff against loadout (⌘D), project chooser (⌘P)
-        popup.rs                  project switcher, paste field, favorites, update bar, footer; in its list
-                                  area: what changed, history, output, loadouts, import preview, settings
-        settings.rs               shortcut, agents, digest, behavior switches (popup's Settings view)
+        menu.rs                   the menu bar menu (Rex-style: header, info rows, actions)
+        settings.rs               Settings window: sidebar, Interface/Shortcuts/Integrations/Notifications/
+                                  Projects/History pages, page routing
+        settings/library.rs       Skills (favorites, what changed) and Loadouts (members, import preview) pages
       macos/
         frontmost.rs              frontmost app → folder (Finder AppleScript, AXDocument for editors)
         login_item.rs             SMAppService
+        dock.rs                   Dock icon image (app icon variants)
         keychain.rs               GitHub token in the login Keychain (security-framework)
         url_scheme.rs             loadout:// and opened-file events, drained by the main poll loop
         launch.rs                 open agent via URL scheme / CLI
-    loadout/assets/           tray/menubar@2x.png (template), icons/ only if GPUI Kit's set lacks one
+    loadout/assets/           tray/menubar@2x.png (template), app-icon/ variants (make-variants.sh)
   packaging/
     Info.plist                    LSUIElement, CFBundleURLTypes (loadout), NSAppleEventsUsageDescription
     bundle.sh                     release build → Loadout.app (+ --install, --universal, --release)
@@ -170,6 +175,9 @@ pub struct Settings {
     #[serde(default)] pub digest_interval_hours: u32,            // e.g. 24 or 168
     #[serde(default)] pub launch_after_install: bool,            // default for equip+launch
     #[serde(default)] pub launchers: BTreeMap<String, String>,   // agent id → shell command, {dir} = project
+    #[serde(default)] pub app_icon: AppIcon,                     // default | twilight | graphite
+    #[serde(default)] pub icon_place: IconPlace,                 // menuBar | dockAndMenuBar | dock
+    #[serde(default)] pub show_window_on_launch: bool,
     // … other calm defaults
 }
 
@@ -225,7 +233,7 @@ A versioned `.loadout.json` (or `loadout://` payload) that includes a version fi
 Import still goes through the same apply path and official CLI.
 
 ### Digest (U11)
-Background timer (or login-item friendly check). If real updates exist across projects since last digest, post one quiet notification summarizing count + top skills. User can open the popup from it.
+Background timer (or login-item friendly check). If real updates exist across projects since last digest, post one quiet notification summarizing count + top skills. Clicking it opens Settings → Skills.
 
 ## Rules (enforced in AGENTS.md)
 

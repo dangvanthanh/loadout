@@ -1,5 +1,6 @@
 //! macOS glue. Keep `unsafe` small, each with a `// SAFETY:` comment.
 
+pub mod dock;
 pub mod frontmost;
 pub mod keychain;
 pub mod launch;
