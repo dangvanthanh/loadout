@@ -12,7 +12,7 @@ Stay inside that positioning. Don't add marketplace browsing, skill editing, ena
 competitors do those (see `docs/COMPETITORS.md`). If a request drifts there, say so and ask first.
 
 Read before changing anything:
-- `docs/PRODUCT.md` — what we're building and why (unique features U1–U11)
+- `docs/PRODUCT.md` — what we're building and why, and its unique features
 - `docs/COMPETITORS.md` — what others already do, and what we leave to them
 - `docs/ARCHITECTURE.md` — crates, modules, data model, flows, rules
 - `docs/DESIGN.md` — UI rules (minimal, theme colors only, one primary button)

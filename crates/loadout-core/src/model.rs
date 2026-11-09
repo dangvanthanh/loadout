@@ -104,7 +104,7 @@ where
     Ok(T::deserialize(value).unwrap_or_default())
 }
 
-/// App icon variants (Settings → Interface).
+/// App icon variants (Settings → General).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AppIcon {

@@ -8,6 +8,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Theme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use loadout_core::contrast;
 use loadout_core::model::Uuid;
 use loadout_core::tags;
 
@@ -22,6 +23,12 @@ pub const TOP_FRACTION: f32 = 0.18;
 const SEARCH_HEIGHT: Pixels = px(56.);
 const BAR_HEIGHT: Pixels = px(52.);
 const ROW_HEIGHT: Pixels = px(40.);
+/// Loadout rows have a second line: their skills.
+const LOADOUT_ROW_HEIGHT: Pixels = px(48.);
+/// The theme tint over the blurred desktop.
+const GLASS: f32 = 0.78;
+/// The foreground wash behind the highlighted row.
+const HIGHLIGHT: f32 = 0.1;
 const LABEL_HEIGHT: Pixels = px(28.);
 const LIST_PADDING: Pixels = px(8.);
 /// Row glyph slot, like Tinycast's result icons.
@@ -47,6 +54,8 @@ struct Row {
     update: bool,
     /// Safety findings for a first install, in one line.
     findings: Option<SharedString>,
+    /// A loadout's skills, "tdd, pdf, frontend-design"; empty for skills.
+    members: SharedString,
 }
 
 impl Row {
@@ -202,6 +211,14 @@ impl Palette {
                     && members.iter().all(|f| state.is_installed_here(*f)),
                 update: members.iter().any(|f| state.update_here(*f)),
                 findings: None,
+                members: state
+                    .data
+                    .loadout_favorites(loadout.id)
+                    .iter()
+                    .map(|f| f.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+                    .into(),
             }
         });
         let favorite_rows = ranked.iter().map(|s| {
@@ -221,6 +238,7 @@ impl Palette {
                     }
                     _ => None,
                 },
+                members: SharedString::default(),
             }
         });
         let (suggested, other): (Vec<Row>, Vec<Row>) = favorite_rows.partition(|r| r.suggested);
@@ -798,24 +816,40 @@ impl Palette {
         let row = &self.rows[ix];
         let selected = self.selected.contains(&row.id);
         let id = row.id;
-        let warning = theme.warning;
-        let muted = theme.muted_foreground;
+        let warning = readable(theme.warning, glass_floor(theme), contrast::NON_TEXT);
+        let muted = muted(theme);
         let is_loadout = row.loadout;
         let this = cx.entity().downgrade();
         let glyph = if is_loadout {
-            Glyph::icon(ExtraIcon::Layers)
+            Glyph::Loadout(row.name.to_string())
         } else {
             Glyph::for_source(&row.source)
         };
+        let status = match (&row.findings, row.update, row.installed) {
+            (Some(findings), ..) => format!(", {findings}"),
+            (_, true, _) => ", update available".into(),
+            (_, _, true) => ", installed".into(),
+            _ => String::new(),
+        };
+        let detail = if is_loadout {
+            &row.members
+        } else {
+            &row.source
+        };
+        let label = format!("{}, {detail}{status}", row.name);
         let element = list_row(("row", ix), highlighted, cx)
+            .role(Role::ListBoxOption)
+            .aria_label(label)
+            .aria_selected(selected)
+            .when(is_loadout, |row| row.h(LOADOUT_ROW_HEIGHT))
             .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
             .child(tile(selected, glyph, cx))
             .child(
                 div()
                     .id(("name", ix))
                     .min_w_0()
-                    .text_size(px(14.))
-                    .truncate()
+                    .flex()
+                    .flex_col()
                     .cursor_pointer()
                     // The name previews (a loadout's name shows its diff); the rest of the row toggles.
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -826,7 +860,16 @@ impl Palette {
                             this.toggle_preview(Some(id), cx);
                         }
                     }))
-                    .child(row.name.clone()),
+                    .child(row_name(row.name.clone()))
+                    .when(is_loadout && !row.members.is_empty(), |name| {
+                        name.child(
+                            div()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(muted)
+                                .child(row.members.clone()),
+                        )
+                    }),
             )
             .child(div().flex_1())
             .when_some(row.findings.clone(), |row, findings| {
@@ -885,16 +928,17 @@ impl Palette {
     fn render_capsule(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let fill = theme.foreground.opacity(0.06);
-        let hover = theme.foreground.opacity(0.08);
         let label = self.primary_label(cx);
-        let main_keys = if self.confirm_uninstall.is_some() {
-            "cmd-backspace"
+        let (main_keys, aria_keys) = if self.confirm_uninstall.is_some() {
+            ("cmd-backspace", "Meta+Backspace")
         } else {
-            "enter"
+            ("enter", "Enter")
         };
-        let part = |id: &'static str| {
+        let on_primary = theme.primary_foreground;
+        let part = |id: &'static str, hover: Hsla| {
             div()
                 .id(id)
+                .role(Role::Button)
                 .h(px(30.))
                 .px_3()
                 .flex()
@@ -915,24 +959,32 @@ impl Palette {
             .border_1()
             .border_color(theme.border.opacity(0.6))
             .child(
-                part("primary")
+                part("primary", theme.primary_hover)
+                    .aria_label(label.clone())
+                    .aria_keyshortcuts(aria_keys)
+                    .bg(theme.primary)
+                    .text_color(on_primary)
                     .font_weight(FontWeight::SEMIBOLD)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.run_action(ActionKind::Install, window, cx)
                     }))
                     .child(label)
-                    .children(keycap(main_keys)),
+                    .children(
+                        keycap(main_keys, theme)
+                            .map(|k| k.bg(on_primary.opacity(0.18)).text_color(on_primary)),
+                    ),
             )
-            .child(div().w(px(1.)).h(px(16.)).bg(theme.border))
             .child(
-                part("actions")
-                    .text_color(theme.muted_foreground)
+                part("actions", theme.foreground.opacity(0.08))
+                    .aria_label("Actions")
+                    .aria_keyshortcuts("Meta+K")
+                    .text_color(muted(theme))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.actions = Some(0);
                         cx.notify();
                     }))
                     .child("Actions")
-                    .children(keycap("cmd-k")),
+                    .children(keycap("cmd-k", theme)),
             )
             .into_any_element()
     }
@@ -942,8 +994,11 @@ impl Palette {
         let items = self.action_items(cx);
         let theme = cx.theme();
         let hover = theme.foreground.opacity(0.05);
-        let active = theme.foreground.opacity(0.09);
+        let active = theme.foreground.opacity(HIGHLIGHT);
         div()
+            .id("actions-menu")
+            .role(Role::Menu)
+            .aria_label("Actions")
             .absolute()
             .right(px(10.))
             .bottom(BAR_HEIGHT)
@@ -959,6 +1014,8 @@ impl Palette {
             .children(items.into_iter().enumerate().map(|(ix, item)| {
                 div()
                     .id(("action", ix))
+                    .role(Role::MenuItem)
+                    .aria_label(item.label.clone())
                     .h(px(32.))
                     .px_3()
                     .flex()
@@ -973,7 +1030,7 @@ impl Palette {
                     }))
                     .child(item.label)
                     .child(div().flex_1())
-                    .children(keycap(item.keys))
+                    .children(keycap(item.keys, theme))
             }))
             .into_any_element()
     }
@@ -1007,9 +1064,12 @@ impl Palette {
                     Icon::new(IconName::Folder),
                 ),
             };
-            let muted = cx.theme().muted_foreground;
+            let muted = muted(cx.theme());
             items.push(
                 list_row(("choice", ix), ix == highlight, cx)
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!("{name}, {detail}"))
+                    .aria_selected(is_current)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose_key(ix, "enter", cx);
                     }))
@@ -1056,9 +1116,12 @@ impl Palette {
         )];
         for (ix, (id, (skill, source))) in missing.into_iter().enumerate() {
             let selected = self.diff_selected.contains(&id);
-            let muted = cx.theme().muted_foreground;
+            let muted = muted(cx.theme());
             items.push(
                 list_row(("missing", ix), ix == self.diff_highlight, cx)
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!("{skill}, {source}, missing"))
+                    .aria_selected(selected)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !this.diff_selected.remove(&id) {
                             this.diff_selected.insert(id);
@@ -1072,10 +1135,11 @@ impl Palette {
                     .into_any_element(),
             );
         }
-        // Installed and extra skills are context, not choices: dimmed, no highlight.
+        // Installed and extra skills are context, not choices: muted names, no highlight. Muted
+        // rather than faded, so the text keeps its contrast.
         let quiet =
             |ix: usize, id: &'static str, skill: String, detail: String, glyph: Glyph, cx: &App| {
-                let muted = cx.theme().muted_foreground;
+                let muted = muted(cx.theme());
                 div()
                     .id((id, ix))
                     .h(ROW_HEIGHT)
@@ -1083,9 +1147,8 @@ impl Palette {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .opacity(0.6)
                     .child(tile(false, glyph, cx))
-                    .child(row_name(skill))
+                    .child(row_name(skill).text_color(muted))
                     .child(div().flex_1())
                     .child(row_detail(detail, muted))
                     .into_any_element()
@@ -1120,7 +1183,7 @@ impl Palette {
         let Some(favorite) = state.data.favorites.iter().find(|f| f.id == id) else {
             return Vec::new();
         };
-        let muted = theme.muted_foreground;
+        let muted = muted(theme);
         let small = |text: SharedString, color: Hsla| {
             div()
                 .px_2()
@@ -1216,8 +1279,8 @@ impl Render for Palette {
         };
         let capsule = self.render_capsule(cx);
         let actions = self.actions.map(|ix| self.render_actions(ix, cx));
-        let (target_name, target_tip) = target_text(self.state.read(cx));
-        let chip = target_chip(target_name, target_tip, cx);
+        let target = target_text(self.state.read(cx));
+        let chip = target_chip(target, cx);
         let state = self.state.read(cx);
         let detection_notice = state.target.notice.clone();
         let safety = state
@@ -1250,7 +1313,8 @@ impl Render for Palette {
                 },
             );
         let theme = cx.theme();
-        let muted = theme.muted_foreground;
+        let muted = muted(theme);
+        let warning = readable(theme.warning, glass_floor(theme), contrast::TEXT);
         let empty = self.rows.is_empty();
         let list_mode = self.preview.is_none() && self.diff.is_none() && self.choosing.is_none();
         let search_icon = if self.naming {
@@ -1272,7 +1336,7 @@ impl Render for Palette {
             .flex()
             .flex_col()
             // Glass: the window blurs what's behind it; this tint keeps text readable.
-            .bg(theme.background.opacity(0.78))
+            .bg(theme.background.opacity(GLASS))
             .text_color(theme.foreground)
             .child(
                 div()
@@ -1303,7 +1367,7 @@ impl Render for Palette {
                         .items_center()
                         .gap_2()
                         .text_size(px(12.))
-                        .text_color(theme.warning)
+                        .text_color(warning)
                         .child(Icon::new(ExtraIcon::ShieldAlert).xsmall())
                         .child(div().truncate().child(notice)),
                 )
@@ -1311,6 +1375,8 @@ impl Render for Palette {
             .child(
                 div()
                     .id("favorites")
+                    .role(Role::ListBox)
+                    .aria_label("Skills and loadouts")
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -1343,12 +1409,13 @@ impl Render for Palette {
                             .items_center()
                             .gap_2()
                             .text_size(px(12.))
-                            .text_color(theme.warning)
+                            .text_color(warning)
                             .child(Icon::new(ExtraIcon::ShieldAlert).small())
                             .child(div().min_w_0().truncate().child(text))
                             .child(
                                 div()
                                     .id("review")
+                                    .role(Role::Button)
                                     .flex_none()
                                     .cursor_pointer()
                                     .text_color(theme.foreground)
@@ -1372,10 +1439,12 @@ impl Render for Palette {
     }
 }
 
-/// A row in the list area: full width, rounded, a soft highlight like Tinycast's.
+/// A row in the list area: full width, rounded, a soft highlight like Tinycast's. The highlight
+/// also gets a 3:1 outline, so it reads as the keyboard focus (WCAG 1.4.11, 2.4.7).
 fn list_row(id: impl Into<ElementId>, highlighted: bool, cx: &App) -> Stateful<Div> {
     let theme = cx.theme();
     let hover = theme.foreground.opacity(0.05);
+    let ring = readable(theme.border, glass_floor(theme), contrast::NON_TEXT);
     div()
         .id(id)
         .h(ROW_HEIGHT)
@@ -1384,7 +1453,12 @@ fn list_row(id: impl Into<ElementId>, highlighted: bool, cx: &App) -> Stateful<D
         .items_center()
         .gap_3()
         .rounded(px(10.))
-        .when(highlighted, |row| row.bg(theme.foreground.opacity(0.09)))
+        .border_1()
+        .border_color(transparent_black())
+        .when(highlighted, |row| {
+            row.bg(theme.foreground.opacity(HIGHLIGHT))
+                .border_color(ring)
+        })
         .when(!highlighted, |row| row.hover(move |s| s.bg(hover)))
 }
 
@@ -1392,6 +1466,8 @@ fn list_row(id: impl Into<ElementId>, highlighted: bool, cx: &App) -> Stateful<D
 pub enum Glyph {
     /// The source owner's initial, tinted per owner (skills).
     Monogram(String),
+    /// Layers, tinted per loadout name.
+    Loadout(String),
     Icon(Box<Icon>),
 }
 
@@ -1438,37 +1514,98 @@ pub fn tile(selected: bool, glyph: Glyph, cx: &App) -> Div {
     match glyph {
         Glyph::Icon(icon) => base
             .bg(theme.foreground.opacity(0.07))
-            .child(icon.small().text_color(theme.muted_foreground)),
+            .child(icon.small().text_color(muted(theme))),
         Glyph::Monogram(owner) => {
-            // Theme chart colors, picked by owner, so one author's skills share a color.
-            let colors = [
-                theme.chart_1,
-                theme.chart_2,
-                theme.chart_3,
-                theme.chart_4,
-                theme.chart_5,
-            ];
-            let hash = owner.bytes().fold(0usize, |h, b| {
-                h.wrapping_mul(31)
-                    .wrapping_add(b.to_ascii_lowercase() as usize)
-            });
-            let color = colors[hash % colors.len()];
+            let color = tint(&owner, theme);
+            let fill = color.opacity(0.18);
             let letter: String = owner
                 .chars()
                 .next()
                 .map_or_else(String::new, |c| c.to_uppercase().collect());
-            base.bg(color.opacity(0.18))
-                .text_color(color)
+            base.bg(fill)
+                .text_color(readable(
+                    color,
+                    glass_floor(theme).blend(fill),
+                    contrast::TEXT,
+                ))
                 .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(letter)
         }
+        Glyph::Loadout(name) => {
+            let color = tint(&name, theme);
+            let fill = color.opacity(0.18);
+            base.bg(fill)
+                .child(Icon::new(ExtraIcon::Layers).small().text_color(readable(
+                    color,
+                    glass_floor(theme).blend(fill),
+                    contrast::NON_TEXT,
+                )))
+        }
     }
 }
 
+/// A theme chart color picked by name, so one author's skills (or one loadout) keep a color.
+fn tint(name: &str, theme: &Theme) -> Hsla {
+    let colors = [
+        theme.chart_1,
+        theme.chart_2,
+        theme.chart_3,
+        theme.chart_4,
+        theme.chart_5,
+    ];
+    let hash = name.bytes().fold(0usize, |h, b| {
+        h.wrapping_mul(31)
+            .wrapping_add(b.to_ascii_lowercase() as usize)
+    });
+    colors[hash % colors.len()]
+}
+
 /// A keycap for a shortcut like "cmd-k"; `None` if it doesn't parse.
-fn keycap(keys: &'static str) -> Option<Kbd> {
-    Keystroke::parse(keys).ok().map(Kbd::new)
+fn keycap(keys: &'static str, theme: &Theme) -> Option<Kbd> {
+    let text = readable(
+        theme.muted_foreground,
+        glass_floor(theme).blend(theme.muted),
+        contrast::TEXT,
+    );
+    Keystroke::parse(keys)
+        .ok()
+        .map(|k| Kbd::new(k).text_color(text))
+}
+
+/// The darkest the glass gets in light mode (the lightest in dark mode): the tint over a desktop
+/// of the opposite brightness, under the highlight wash. Colors readable on it are readable
+/// anywhere in the palette.
+pub fn glass_floor(theme: &Theme) -> Hsla {
+    let behind = if theme.is_dark() { white() } else { black() };
+    behind
+        .blend(theme.background.opacity(GLASS))
+        .blend(theme.foreground.opacity(HIGHLIGHT))
+}
+
+/// `color`, darkened (or lightened on dark backgrounds) until it has `min` contrast on `bg`.
+pub fn readable(color: Hsla, bg: Hsla, min: f32) -> Hsla {
+    let rgb = |c: Hsla| {
+        let c = c.to_rgb();
+        [c.r, c.g, c.b]
+    };
+    let bg = rgb(bg);
+    // Below this luminance white has more room than black.
+    let step = if contrast::luminance(bg) > 0.18 {
+        -0.02
+    } else {
+        0.02
+    };
+    let mut color = color;
+    while contrast::ratio(rgb(color), bg) < min && (0.0..=1.0).contains(&(color.l + step)) {
+        color.l += step;
+    }
+    color
+}
+
+/// Muted text that keeps 4.5:1 on the glass.
+pub fn muted(theme: &Theme) -> Hsla {
+    readable(theme.muted_foreground, glass_floor(theme), contrast::TEXT)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1506,7 +1643,11 @@ pub fn update_pill(cx: &App) -> Div {
         .py(px(1.))
         .rounded_full()
         .bg(theme.primary.opacity(0.12))
-        .text_color(theme.primary)
+        .text_color(readable(
+            theme.primary,
+            glass_floor(theme).blend(theme.primary.opacity(0.12)),
+            contrast::TEXT,
+        ))
         .text_size(px(11.))
         .font_weight(FontWeight::MEDIUM)
         .child("Update")
@@ -1559,7 +1700,7 @@ fn list_label(text: SharedString, cx: &App) -> AnyElement {
         .items_center()
         .text_size(px(12.))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(cx.theme().muted_foreground)
+        .text_color(muted(cx.theme()))
         .child(text)
         .into_any_element()
 }
@@ -1583,8 +1724,17 @@ fn row_detail(text: impl Into<SharedString>, muted: Hsla) -> Div {
         .child(text.into())
 }
 
-/// The chip's name and tooltip: where Return installs, and where that came from.
-fn target_text(state: &AppState) -> (SharedString, SharedString) {
+/// The target's two lines and tooltip.
+struct TargetText {
+    global: bool,
+    name: SharedString,
+    /// The stack when known, else where the target came from.
+    detail: SharedString,
+    tip: SharedString,
+}
+
+/// Where Return installs, and where that came from.
+fn target_text(state: &AppState) -> TargetText {
     let target = &state.target;
     let global = state.data.settings.global;
     let name: SharedString = if global {
@@ -1616,28 +1766,50 @@ fn target_text(state: &AppState) -> (SharedString, SharedString) {
     } else {
         format!("{origin} · {stack} · ⌘P to change").into()
     };
-    (name, tip)
+    let detail: SharedString = if global {
+        "Home folder".into()
+    } else if stack.is_empty() || target.detecting {
+        origin.into()
+    } else {
+        stack.into()
+    };
+    TargetText {
+        global,
+        name,
+        detail,
+        tip,
+    }
 }
 
-/// Where Return installs, as a chip on the search row: "📁 shop-dashboard ⌄"; ⌘P or a click
-/// changes it.
-fn target_chip(name: SharedString, tip: SharedString, cx: &mut Context<Palette>) -> AnyElement {
+/// Where Return installs, on the search row: a folder tile, the project over its stack, and a
+/// caret; ⌘P or a click changes it.
+fn target_chip(target: TargetText, cx: &mut Context<Palette>) -> AnyElement {
     let theme = cx.theme();
     let hover = theme.foreground.opacity(0.08);
+    let icon = if target.global {
+        IconName::Globe
+    } else {
+        IconName::Folder
+    };
+    let label = format!("Install into {}, {}", target.name, target.detail);
+    let tip = target.tip;
     div()
         .id("target")
-        .h(px(28.))
-        .px_3()
+        .role(Role::Button)
+        .aria_label(label)
+        .aria_keyshortcuts("Meta+P")
+        .h(px(40.))
+        .pl(px(7.))
+        .pr_3()
         .flex()
         .flex_none()
         .items_center()
-        .gap_2()
-        .rounded_full()
+        .gap(px(10.))
+        .rounded(px(10.))
         .bg(theme.foreground.opacity(0.05))
         .hover(move |s| s.bg(hover))
         .cursor_pointer()
-        .text_size(px(12.))
-        .text_color(theme.muted_foreground)
+        .text_color(muted(theme))
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .on_click(cx.listener(|this, _, _, cx| {
             this.choosing = Some(0);
@@ -1645,13 +1817,32 @@ fn target_chip(name: SharedString, tip: SharedString, cx: &mut Context<Palette>)
             this.diff = None;
             cx.notify();
         }))
-        .child(Icon::new(IconName::Folder).xsmall())
+        .child(
+            div()
+                .size(TILE)
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(7.))
+                .bg(theme.blue.opacity(0.15))
+                .child(Icon::new(icon).small().text_color(theme.blue)),
+        )
         .child(
             div()
                 .max_w(px(180.))
-                .truncate()
-                .text_color(theme.foreground)
-                .child(name),
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.foreground)
+                        .child(target.name),
+                )
+                .child(div().truncate().text_size(px(11.)).child(target.detail)),
         )
         .child(Icon::new(IconName::ChevronDown).xsmall())
         .into_any_element()

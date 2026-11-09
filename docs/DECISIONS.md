@@ -11,7 +11,7 @@ palette looks like Tinycast (047, 048) and opens from ⌃⌥L or a Dock click (0
 ## 001 — Wrap the `skills` CLI instead of copying files ourselves
 **Choice:** Every install runs `npx skills add … -y`.
 **Why:** The CLI already knows 30+ agents' folder layouts, symlink vs copy, and lock files. Competitors reimplement
-this; staying on the official path is part of our positioning (U6).
+this; staying on the official path is part of our positioning.
 **Cost:** Needs Node.js. First run is slower while `npx` downloads the CLI.
 
 ## 002 — Don't use the skills.sh API
@@ -25,7 +25,7 @@ this; staying on the official path is part of our positioning (U6).
 
 ## 004 — Version = git tree hash of the skill's folder
 **Choice:** Use the folder's tree `sha` from the GitHub trees API.
-**Why:** Changes only when that folder's files change, so README edits never raise an update (U3). One request per repo.
+**Why:** Changes only when that folder's files change, so README edits never raise an update. One request per repo.
 **Cost:** Skills are matched to folders by folder name first, frontmatter `name:` second.
 
 ## 005 — Rust + GPUI + GPUI Kit (replaces SwiftUI)
@@ -63,7 +63,7 @@ usage stats, and sync to other apps.
 **Why:** October 2026 research (`COMPETITORS.md`) found at least five free skill managers. The leader, Skills Manager
 (~6.6k ★), already does library management, presets, upstream compare, and sync across 56 agents. Competing there is
 a losing race; the "where you are, right now" flow is unclaimed.
-**Consequence:** The palette, not the popup, is the main surface. The plan builds U1/U2 first (M0–M2) and moves
+**Consequence:** The palette, not the popup, is the main surface. The plan builds project detection and stack suggestions first (M0–M2) and moves
 popup parity and team features to M5.
 
 ## 011 — Rename SkillDock → Loadout; hotkey ⌃⌥L
@@ -560,3 +560,30 @@ as the shortcut; if the palette is already open it stays. Settings stays one ste
 the menu bar menu.
 **Cost:** a Dock click makes Loadout the frontmost app, so the palette can't see which project you were in. It
 targets the last used project (shown as "Last used" on its chip), and ⌘P picks another.
+
+## 052 — A two-line target chip
+**Choice:** The palette's target chip shows two lines, like the project card in `reference/images-prototype/palette.jpg`:
+a 26 px blue folder (or globe) tile, the project name, and under it the detected stack ("Next.js, Tailwind"), or
+where the target came from when no stack is known ("From Zed", "Last used", "Home folder" for Global). It stays in
+the 56 px search row, so the list keeps its height and 048's layout (no card grid, no hint footer). It is exposed to
+VoiceOver as a button labeled "Install into <project>, <detail>" with ⌘P as its shortcut.
+**Why:** the stack was only in the tooltip, yet it's what explains the "Suggested for …" section.
+
+## 053 — Palette polish and WCAG 2.2 AA
+**Choice:** Loadout rows are 48 px with two lines: the name over its skills, and a layers tile tinted per
+loadout like the skills' monograms. The capsule's main action is filled with primary (DESIGN rule 1). The
+highlighted row gets a 10% wash and a 1 px outline at 3:1. Palette colors pass WCAG 2.2 AA: text 4.5:1, icons and
+the outline 3:1, checked against the worst-case glass (the 78% tint over a desktop of the opposite brightness).
+Theme colors are kept and only moved in lightness until they pass, so there's still no hex in view code. The
+diff's installed/extra rows use muted names instead of 60% opacity. Rows, the list, the capsule and ⌘K expose
+roles, labels and selected state to VoiceOver.
+**Cost:** in light mode the muted text comes out noticeably darker than the theme's neutral-500, because the
+glass can be dark behind it. A more opaque tint would let it stay lighter.
+**Not done:** VoiceOver doesn't follow the arrow-key highlight: GPUI's active-descendant pattern needs the list's
+container to hold focus, and the search field holds it. The menu and Settings haven't had this pass.
+
+## 054 — Search replaces the Settings sidebar header
+**Choice:** The sidebar's top shows a search field instead of the app icon, name, and status (the version is on
+the About page; pending updates still show as the count on Skills). Typing filters the sidebar to pages whose
+title or settings match every word (`Page::keywords`), Return opens the first match, ⌘F focuses the field, and
+Esc clears it before doing anything else. It finds pages, not individual rows.

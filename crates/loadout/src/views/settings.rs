@@ -1,6 +1,7 @@
 //! The Settings window: a sidebar of pages. Everything the
 //! old menu bar popup managed lives here; the menu bar keeps a small menu.
 
+mod about;
 mod library;
 
 use std::path::PathBuf;
@@ -37,7 +38,7 @@ const HISTORY_LINES: usize = 300;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
     #[default]
-    Interface,
+    General,
     Shortcuts,
     Integrations,
     Notifications,
@@ -45,22 +46,28 @@ pub enum Page {
     Loadouts,
     Projects,
     History,
+    About,
 }
 
 impl Page {
-    const GROUPS: [&'static [Page]; 2] = [
+    fn all() -> impl Iterator<Item = Page> {
+        Page::GROUPS.into_iter().flatten().copied()
+    }
+
+    const GROUPS: [&'static [Page]; 3] = [
         &[
-            Page::Interface,
+            Page::General,
             Page::Shortcuts,
             Page::Integrations,
             Page::Notifications,
         ],
         &[Page::Skills, Page::Loadouts, Page::Projects, Page::History],
+        &[Page::About],
     ];
 
     fn title(self) -> &'static str {
         match self {
-            Page::Interface => "Interface",
+            Page::General => "General",
             Page::Shortcuts => "Shortcuts",
             Page::Integrations => "Integrations",
             Page::Notifications => "Notifications",
@@ -68,12 +75,13 @@ impl Page {
             Page::Loadouts => "Loadouts",
             Page::Projects => "Projects",
             Page::History => "History",
+            Page::About => "About",
         }
     }
 
     fn icon(self) -> Icon {
         match self {
-            Page::Interface => Icon::new(IconName::LayoutDashboard),
+            Page::General => ExtraIcon::Settings.into(),
             Page::Shortcuts => ExtraIcon::Command.into(),
             Page::Integrations => Icon::new(IconName::Bot),
             Page::Notifications => Icon::new(IconName::Bell),
@@ -81,13 +89,42 @@ impl Page {
             Page::Loadouts => ExtraIcon::Layers.into(),
             Page::Projects => Icon::new(IconName::Folder),
             Page::History => ExtraIcon::Clock.into(),
+            Page::About => Icon::new(IconName::Info),
         }
+    }
+
+    /// What its settings are called, so the sidebar search finds the page.
+    fn keywords(self) -> &'static str {
+        match self {
+            Page::General => "app icon dock menu bar startup show window on launch open at login",
+            Page::Shortcuts => "keyboard hotkey open palette keys record",
+            Page::Integrations => {
+                "coding agents launch open the agent after installing launch commands github token"
+            }
+            Page::Notifications => {
+                "updates check automatically digest daily weekly test notification"
+            }
+            Page::Skills => "favorites paste add update all what changed",
+            Page::Loadouts => "import file share preferred agent tags version",
+            Page::Projects => "install into global add project reveal forget",
+            Page::History => "provenance output log",
+            Page::About => "version",
+        }
+    }
+
+    /// Every word of the query is in the page's title or keywords.
+    fn matches(self, query: &str) -> bool {
+        let haystack = format!("{} {}", self.title(), self.keywords()).to_lowercase();
+        query
+            .to_lowercase()
+            .split_whitespace()
+            .all(|word| haystack.contains(word))
     }
 
     /// The colored square behind the sidebar icon, from the theme's named colors.
     fn color(self, theme: &Theme) -> Hsla {
         match self {
-            Page::Interface => theme.blue,
+            Page::General => theme.blue,
             Page::Shortcuts => theme.muted_foreground,
             Page::Integrations => theme.magenta,
             Page::Notifications => theme.red,
@@ -95,6 +132,7 @@ impl Page {
             Page::Loadouts => theme.cyan,
             Page::Projects => theme.yellow,
             Page::History => theme.muted_foreground,
+            Page::About => theme.blue,
         }
     }
 }
@@ -131,6 +169,8 @@ pub struct SettingsWindow {
     history: HistoryFilter,
     history_tab: HistoryTab,
     focus: FocusHandle,
+    /// Filters the sidebar's pages.
+    search: Entity<InputState>,
     /// Skills: paste a link or owner/repo.
     paste: Entity<InputState>,
     /// The inline rename / tags / loadout field being edited.
@@ -161,6 +201,7 @@ impl SettingsWindow {
                 .placeholder("Paste a link, owner/repo, or an npx skills add command")
         });
         let edit = cx.new(|cx| InputState::new(window, cx));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
         let shortcut_filter =
             cx.new(|cx| InputState::new(window, cx).placeholder("Filter shortcuts…"));
         let (saved_token, saved_launchers) = {
@@ -248,6 +289,16 @@ impl SettingsWindow {
                 },
             ),
             cx.subscribe(&shortcut_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+            cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
+                // Return opens the first page that matches.
+                if let InputEvent::PressEnter { .. } = event {
+                    let query = input.read(cx).value().to_string();
+                    if let Some(page) = Page::all().find(|page| page.matches(&query)) {
+                        this.go(page, Detail::None, cx);
+                    }
+                }
+                cx.notify();
+            }),
             cx.subscribe(&token, |this, input, event: &InputEvent, cx| {
                 // Only Return saves: a half-pasted token shouldn't reach the Keychain on blur.
                 if let InputEvent::PressEnter { .. } = event {
@@ -286,6 +337,7 @@ impl SettingsWindow {
             history: HistoryFilter::All,
             history_tab: HistoryTab::History,
             focus,
+            search,
             paste,
             edit,
             editing: None,
@@ -351,8 +403,14 @@ impl SettingsWindow {
         }
         match (m.platform, key) {
             (true, "w") => window.remove_window(),
+            (true, "f") => self
+                .search
+                .update(cx, |search, cx| search.focus(window, cx)),
             (false, "escape") => {
-                if self.editing.take().is_some() {
+                if !self.search.read(cx).value().is_empty() {
+                    self.search
+                        .update(cx, |search, cx| search.set_value("", window, cx));
+                } else if self.editing.take().is_some() {
                     window.focus(&self.focus, cx);
                 } else if self.detail != Detail::None {
                     self.detail = Detail::None;
@@ -521,7 +579,7 @@ fn key_box(text: impl Into<SharedString>, cx: &App) -> Div {
 // MARK: pages
 
 impl SettingsWindow {
-    fn render_interface(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_general(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let state = self.state.read(cx);
         let settings = &state.data.settings;
         let (current_icon, place) = (settings.app_icon, settings.icon_place);
@@ -1413,30 +1471,28 @@ impl SettingsWindow {
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.state.read(cx);
-        let pending = state.pending().len();
+        let pending = self.state.read(cx).pending().len();
+        let query = self.search.read(cx).value().to_string();
         let theme = cx.theme();
-        let (dot, status): (Hsla, SharedString) = if state.installing {
-            (theme.blue, "Installing…".into())
-        } else if pending > 0 {
-            (
-                theme.blue,
-                match pending {
-                    1 => "1 update".into(),
-                    n => format!("{n} updates").into(),
-                },
-            )
-        } else {
-            (theme.success, "Up to date".into())
-        };
-        let icon = app_icon_path(state.data.settings.app_icon);
         let selected = self.page;
-        let groups = Page::GROUPS.iter().map(|group| {
+        let groups: Vec<Vec<Page>> = Page::GROUPS
+            .iter()
+            .map(|group| {
+                group
+                    .iter()
+                    .copied()
+                    .filter(|p| p.matches(&query))
+                    .collect()
+            })
+            .filter(|group: &Vec<Page>| !group.is_empty())
+            .collect();
+        let no_results = groups.is_empty();
+        let groups = groups.into_iter().map(|group| {
             div()
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .children(group.iter().map(|&page| {
+                .children(group.into_iter().map(|page| {
                     let chosen = page == selected;
                     let hover = theme.sidebar_accent.opacity(0.6);
                     div()
@@ -1497,33 +1553,32 @@ impl SettingsWindow {
             .text_color(theme.sidebar_foreground)
             .child(
                 div()
+                    .h(px(28.))
                     .px_2()
                     .flex()
                     .items_center()
-                    .gap(px(10.))
-                    .child(img(icon).size(px(30.)).rounded(px(7.)))
+                    .rounded(px(7.))
+                    .bg(theme.foreground.opacity(0.06))
                     .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .text_size(px(13.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Loadout"),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(5.))
-                                    .text_size(px(11.))
-                                    .text_color(theme.muted_foreground)
-                                    .child(div().size(px(6.)).rounded_full().bg(dot))
-                                    .child(status),
+                        Input::new(&self.search)
+                            .appearance(false)
+                            .small()
+                            .prefix(
+                                Icon::new(IconName::Search)
+                                    .small()
+                                    .text_color(theme.muted_foreground),
                             ),
                     ),
             )
+            .when(no_results, |sidebar| {
+                sidebar.child(
+                    div()
+                        .px_2()
+                        .text_size(px(12.))
+                        .text_color(theme.muted_foreground)
+                        .child("No results"),
+                )
+            })
             .children(groups)
             .into_any_element()
     }
@@ -1533,7 +1588,7 @@ impl Render for SettingsWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let sidebar = self.render_sidebar(cx);
         let items = match self.page {
-            Page::Interface => self.render_interface(cx),
+            Page::General => self.render_general(cx),
             Page::Shortcuts => self.render_shortcuts(cx),
             Page::Integrations => self.render_integrations(cx),
             Page::Notifications => self.render_notifications(cx),
@@ -1541,6 +1596,7 @@ impl Render for SettingsWindow {
             Page::Loadouts => self.render_loadouts_page(cx),
             Page::Projects => self.render_projects(cx),
             Page::History => self.render_history(cx),
+            Page::About => self.render_about(cx),
         };
         let state = self.state.read(cx);
         let notice = state
@@ -1601,5 +1657,26 @@ impl Render for SettingsWindow {
                             .children(items),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Page;
+
+    #[test]
+    fn search_matches_titles_and_settings() {
+        assert!(Page::General.matches(""));
+        assert!(Page::General.matches("login"));
+        assert!(Page::Integrations.matches("GitHub token"));
+        assert!(Page::About.matches("vers"));
+        assert!(!Page::About.matches("login"));
+        assert!(!Page::General.matches("login token"));
+        assert_eq!(
+            Page::all()
+                .filter(|p| p.matches("digest"))
+                .collect::<Vec<_>>(),
+            [Page::Notifications]
+        );
     }
 }

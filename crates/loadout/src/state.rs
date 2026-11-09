@@ -1491,7 +1491,7 @@ impl AppState {
         cx.notify();
     }
 
-    /// Dock icon, its image, and the menu bar item, from the Interface settings.
+    /// Dock icon, its image, and the menu bar item, from the General settings.
     pub fn apply_interface(settings: &Settings, cx: &mut App) {
         let place = settings.icon_place;
         cx.set_activation_policy(if place.in_dock() {

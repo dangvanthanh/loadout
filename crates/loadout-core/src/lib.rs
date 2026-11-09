@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod context;
+pub mod contrast;
 pub mod diff;
 pub mod digest;
 pub mod installed;

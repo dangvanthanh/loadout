@@ -11,8 +11,8 @@ Three surfaces:
   against a loadout, preview a skill, pick another project.
 - **Menu** (menu bar click, 290 pt): status, target, version, Open Palette, Update All, Check for Updates…,
   Settings…, Quit.
-- **Settings** (a normal window with a sidebar): Interface, Shortcuts, Integrations, Notifications, Skills,
-  Loadouts, Projects, History. Managing favorites, loadouts, projects, and history happens here.
+- **Settings** (a normal window with a sidebar): General, Shortcuts, Integrations, Notifications, Skills,
+  Loadouts, Projects, History, About. Managing favorites, loadouts, projects, and history happens here.
 
 Outside dependencies at runtime:
 1. The official **`skills` CLI** (`npx -y skills add/remove … -y`) performs every install, update, and uninstall.
@@ -74,20 +74,21 @@ loadout/
       agents.rs                   agent ids, names, project/global skill folders, list parsing
       parser.rs                   paste text → Vec<Favorite>
       ui_skills.rs                resolve ui-skills.com links
-      project.rs                  find project root from any path                         (U1)
-      stack.rs                    detect stack tags with evidence                         (U2)
-      context.rs                  open file / git changes / recent files for ranking      (U2)
-      tags.rs                     suggest tags for a favorite; rank to stack + context    (U2)
-      installer.rs                build + run `npx skills add/remove`, streaming          (U6)
+      project.rs                  find project root from any path
+      stack.rs                    detect stack tags with evidence
+      context.rs                  open file / git changes / recent files for ranking
+      contrast.rs                 WCAG contrast ratio, used to keep palette colors readable
+      tags.rs                     suggest tags for a favorite; rank to stack + context
+      installer.rs                build + run `npx skills add/remove`, streaming
       installed.rs                read skills-lock.json / agent folders for existing installs
-      updates.rs                  GitHub trees, version per favorite, raw file reads      (U3)
-      diff.rs                     SKILL.md diff + file changes (`similar`)                (U3)
-      safety.rs                   heuristic scan + compatibility notes                    (U4)
-      loadout_diff.rs             missing / present / extra skills vs a loadout           (U7)
-      share.rs                    loadout:// links, .loadout.json, team versions          (U5, U10)
-      provenance.rs               append-only local audit log, one-line descriptions      (U8)
-      launch.rs                   which launcher opens an agent                           (U9)
-      digest.rs                   when the digest is due, and its one-line summary        (U11)
+      updates.rs                  GitHub trees, version per favorite, raw file reads
+      diff.rs                     SKILL.md diff + file changes (`similar`)
+      safety.rs                   heuristic scan + compatibility notes
+      loadout_diff.rs             missing / present / extra skills vs a loadout
+      share.rs                    loadout:// links, .loadout.json, team versions
+      provenance.rs               append-only local audit log, one-line descriptions
+      launch.rs                   which launcher opens an agent
+      digest.rs                   when the digest is due, and its one-line summary
       shortcut.rs                 palette shortcut: spec ↔ ⌃⌥L display ↔ recorded keystroke
     loadout-core/tests/fixtures/  projects/, trees/, html/, data/
     loadout/src/
@@ -101,9 +102,10 @@ loadout/
         palette.rs                search, target chip, sections, keyboard, ⌘K actions; in its list area:
                                   skill preview (⌘Y), diff against loadout (⌘D), project chooser (⌘P)
         menu.rs                   the menu bar menu
-        settings.rs               Settings window: sidebar, routing, Interface / Shortcuts / Integrations /
+        settings.rs               Settings window: sidebar, routing, General / Shortcuts / Integrations /
                                   Notifications / Projects / History pages
         settings/library.rs       Skills (favorites, what changed) and Loadouts (members, import preview)
+        settings/about.rs         About: app icon, name, version
       macos/
         frontmost.rs              frontmost app → folder (Finder via osascript, AXDocument for the rest)
         login_item.rs             SMAppService
@@ -230,29 +232,29 @@ The GitHub token is not in data.json; it's in the login Keychain (service `local
 
 ### Equip (palette Return)
 1. Detect the target off the main thread: frontmost app → folder → project root → stack, installed skills, and
-   context signals (U1, U2). A chosen project or Global overrides it.
+   context signals. A chosen project or Global overrides it.
 2. Rank favorites and loadouts; pre-select stack matches.
 3. On Return: expand loadouts into skills; skip installed ones; update the ones behind.
-4. First installs get the safety glance (scan, then a notice; Return again installs anyway) (U4).
+4. First installs get the safety glance (scan, then a notice; Return again installs anyway).
 5. Run `npx skills add` one by one, streaming output; record versions, `install`/`update` provenance, and one
-   `apply_loadout` entry per loadout (U6, U8).
-6. With ⌘↩ (or "open after installing"), open the agent unless every job failed (U9).
+   `apply_loadout` entry per loadout.
+6. With ⌘↩ (or "open after installing"), open the agent unless every job failed.
 
-### Diff against loadout (U7)
+### Diff against loadout
 Missing (selectable, pre-selected), installed, and extra skills for the target, computed live from Loadout's
 records plus the lock file and agent folders. Return installs the missing ones through the equip flow.
 
-### Update (U3)
+### Update
 An hourly tick runs the 6-hourly check (or the digest when it's on): one tree listing per repo, only for skills
 with a known installed version. A version is the skill folder's tree SHA, so README-only changes never surface.
 What changed shows the file list and SKILL.md diff. Pin and ignore persist in `skillState`.
 
-### Team loadouts (U10)
+### Team loadouts
 A `.loadout.json` or `loadout://` link with `version` and an https `source`. "Check for a newer version" fetches the
 source and previews the import only if it's newer. Every import is validated and previewed; nothing installs until
 the palette.
 
-### Digest (U11)
+### Digest
 When on and due, one check and at most one notification per interval naming what's pending. Clicking it opens
 Settings → Skills.
 

@@ -35,14 +35,15 @@ Wireframes for all three surfaces are in `PRODUCT.md` → Screens. Reference ima
 | Token | Value |
 |---|---|
 | Palette | 750 × 475 pt, fixed, centered on the active screen with its top edge 18% down; shrinks on small screens |
-| Palette search | 56 px tall, 20 px text, 18 px search glyph, no border; the target chip on its right |
-| Target chip | 28 px pill: folder icon, project (or Global), chevron; tooltip says where it came from; click or ⌘P |
-| Palette row | 40 px, radius 10, 26 px tile, 14 px name, 13 px muted source (up to 340 px) on the right |
-| Palette bar | 52 px: status or safety notice on the left, capsule (main action ↩ · Actions ⌘K) on the right |
+| Palette search | 56 px tall, 20 px text, 18 px search glyph, no border; the two-line target chip on its right |
+| Target chip | 40 px, radius 10: 26 px blue folder (Global: globe) tile, project in 13 px medium over its stack (or where it came from) in 11 px muted, chevron; tooltip says where it came from; click or ⌘P |
+| Palette row | 40 px, radius 10, 26 px tile, 14 px name, 13 px muted source (up to 340 px) on the right; highlighted: 10% foreground wash and a 1 px outline at 3:1 |
+| Loadout row | 48 px: a layers tile tinted per loadout, the name over its skills (12 px muted), subtitle on the right |
+| Palette bar | 52 px: status or safety notice on the left, capsule on the right: the main action ↩ filled with primary, then Actions ⌘K |
 | Actions menu (⌘K) | 320 px, radius 12, popover color, 32 px items with keycaps, above the capsule |
-| Menu | 290 px: 54 px header (34 px app icon, name, status dot), 18 px info rows, 28 px items, shortcuts on the right |
+| Menu | 290 px: 54 px header (34 px app icon, name, status dot), 28 px items, shortcuts on the right |
 | Settings window | 800 × 600 (min 700 × 480), transparent titlebar, 52 px title bar |
-| Settings sidebar | 220 px, theme sidebar colors; 30 px items with 20 px colored icon squares; app icon + status on top |
+| Settings sidebar | 220 px, theme sidebar colors; 30 px items with 20 px colored icon squares; a 28 px search field on top that filters pages (⌘F, Esc clears, Return opens the first) |
 | Settings card | radius 10, faint foreground wash, hairline dividers; 44 px rows: label + 11 px hint left, control right |
 | Settings list row | 44 px, radius 10, 26 px tile, name + 11 px muted detail |
 | Segmented control | pill with 24 px options; the chosen one raised on the background color |
@@ -75,10 +76,10 @@ GPUI Kit `IconName`; icons outside its default set are added with `icon_assets!`
 | Installed | check, muted |
 | Pinned | pin, muted |
 | Safety finding | shield-alert, warning color |
-| Settings pages | layout-dashboard, command, bot, bell, book-open, layers, folder, clock |
+| Settings pages | settings (gear), command, bot, bell, book-open, layers, folder, clock, info |
 
 **App icon:** the octopus in a bucket hat (`reference/images-prototype/loadout-logo.png`), with Twilight and Graphite
-variants for Settings → Interface. **Menu bar icon:** the octopus as a template image (`assets/tray/menubar@2x.png`,
+variants for Settings → General. **Menu bar icon:** the octopus as a template image (`assets/tray/menubar@2x.png`,
 36 px at 18 pt); `menubar-update@2x.png` adds a dot while updates are pending.
 
 ## Row states
@@ -108,6 +109,15 @@ Windows appear instantly (no zoom). Hover and selection changes are instant. No 
 
 ## Accessibility
 
+Target: WCAG 2.2 AA.
+
 - Every icon-only button has a tooltip and an accessibility label.
 - Full keyboard coverage in the palette; ⌘K lists every action.
 - Status never relies on color alone (the dot always has text next to it).
+- Text keeps 4.5:1 and icons and the highlight outline 3:1 (`loadout_core::contrast`). On glass, colors are
+  checked against `palette::glass_floor`, the worst case: the tint over a desktop of the opposite brightness.
+  `palette::readable` darkens (or lightens) a theme color until it passes; `palette::muted` is muted text.
+- Never fade text with `opacity`; use muted color instead.
+- Palette semantics: the list is a list box, rows are options with their selected state and a label that
+  includes the source and installed/update status; the capsule halves are buttons with their shortcuts; ⌘K is
+  a menu of menu items.

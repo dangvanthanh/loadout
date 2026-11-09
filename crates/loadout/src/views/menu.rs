@@ -16,21 +16,12 @@ pub const WIDTH: Pixels = px(290.);
 const PADDING: Pixels = px(6.);
 const HEADER: Pixels = px(54.);
 const SEPARATOR: Pixels = px(9.);
-const INFO_ROW: Pixels = px(18.);
 const ITEM: Pixels = px(28.);
 
 /// Height for the menu; "Update All" only shows when something is pending.
 pub fn height(updates: bool) -> Pixels {
     let items = if updates { 4. } else { 3. };
-    PADDING * 2.
-        + HEADER
-        + SEPARATOR
-        + INFO_ROW * 2.
-        + px(8.)
-        + SEPARATOR
-        + ITEM * items
-        + SEPARATOR
-        + ITEM
+    PADDING * 2. + HEADER + SEPARATOR + ITEM * items + SEPARATOR + ITEM
 }
 
 pub struct Menu {
@@ -158,17 +149,6 @@ impl Render for Menu {
         let busy = state.installing;
         let muted = theme.muted_foreground;
         let hover = theme.foreground.opacity(0.08);
-        let info = |label: &'static str, value: SharedString| {
-            div()
-                .h(INFO_ROW)
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(px(12.))
-                .child(div().w(px(56.)).text_color(muted).child(label))
-                .child(div().min_w_0().truncate().child(value))
-        };
         let state = self.state.clone();
         div()
             .track_focus(&self.focus)
@@ -220,12 +200,6 @@ impl Render for Menu {
                             ),
                     )
                     .child(Icon::new(IconName::ChevronRight).small().text_color(muted)),
-            )
-            .child(separator(cx))
-            .child(
-                div()
-                    .py(px(4.))
-                    .child(info("Version", env!("CARGO_PKG_VERSION").into())),
             )
             .child(separator(cx))
             .child(

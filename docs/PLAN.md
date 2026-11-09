@@ -1,6 +1,6 @@
 # Loadout — Plan
 
-The original plan (M0–M5, tasks T0.1–T5.4) is complete. Every unique feature in `PRODUCT.md` (U1–U11) is built;
+The original plan (M0–M5, tasks T0.1–T5.4) is complete. Every unique feature in `PRODUCT.md` is built;
 `git log` has one commit per task (`T2.1: palette with suggestions`, …) and `DECISIONS.md` records why each piece
 works the way it does.
 

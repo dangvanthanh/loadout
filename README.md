@@ -13,12 +13,12 @@ A minimal macOS menu bar app built with **Rust**, **GPUI**, and **GPUI Kit**.
 ## Status
 
 Built: the palette, favorites, calm updates, safety glances, loadouts with diff and launch, sharing, team versions,
-the digest, the menu bar menu, Settings, and uninstall (all of U1–U11). What's left for a public release is a
+the digest, the menu bar menu, Settings, and uninstall. What's left for a public release is a
 Developer ID-signed, notarized build and a published Homebrew cask: [`docs/RELEASE.md`](docs/RELEASE.md).
 
 | Doc | What's in it |
 |---|---|
-| [Product](docs/PRODUCT.md) | Positioning, unique features U1–U11, screens, copy rules |
+| [Product](docs/PRODUCT.md) | Positioning, unique features, screens, copy rules |
 | [Competitors](docs/COMPETITORS.md) | Similar apps, feature overlap, what we leave to them |
 | [Architecture](docs/ARCHITECTURE.md) | Crates, modules, data model, flows, dependencies |
 | [Design](docs/DESIGN.md) | Palette, menu, and Settings UI rules for GPUI Kit |
@@ -39,17 +39,17 @@ app like Skills Manager or SkillDeck.
 
 ## Unique features (summary)
 
-- **U1** Project you're in (Finder / editor)
-- **U2** Stack-aware + context-weighted suggestions
-- **U3** Calm, honest updates (skill-folder tree SHA only)
-- **U4** Safety + compatibility glance
-- **U5** Agent-aware loadouts (preferred agent)
-- **U6** Official `skills` CLI underneath
-- **U7** Diff against loadout
-- **U8** Skill provenance + audit
-- **U9** One-shot equip + launch
-- **U10** Shared team loadouts with versioning
-- **U11** Idle “what changed” digest
+- Project you're in (Finder / editor)
+- Stack-aware, context-weighted suggestions
+- Calm, honest updates (skill-folder tree SHA only)
+- Safety and compatibility glance
+- Agent-aware loadouts (preferred agent)
+- Official `skills` CLI underneath
+- Diff against loadout
+- Skill provenance and audit
+- One-shot equip and launch
+- Shared team loadouts with versioning
+- Idle "what changed" digest
 
 ## Using it
 

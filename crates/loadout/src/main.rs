@@ -35,7 +35,7 @@ fn main() {
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-,", OpenSettings, None),
         ]);
-        // Shown only while Loadout is in the Dock (Settings → Interface).
+        // Shown only while Loadout is in the Dock (Settings → General).
         cx.set_menus([Menu::new("Loadout").items([
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::separator(),

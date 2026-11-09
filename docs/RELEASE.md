@@ -50,7 +50,7 @@ These are decisions or accounts only the owner has. Do them in this order.
 Built and covered by core tests or rendered to images, but never exercised by hand in the bundled app:
 
 - Recording a new palette shortcut in Settings → Shortcuts (and Reset).
-- Settings → Interface → Show app icon: Dock only, Dock and menu bar; the Dock icon image for each app icon;
+- Settings → General → Show app icon: Dock only, Dock and menu bar; the Dock icon image for each app icon;
   clicking the Dock icon opens the palette.
 - Saving a GitHub token through Settings → Integrations (Keychain prompt), then an update check with it.
 - The digest notification (Settings → Notifications → Daily) and clicking it.

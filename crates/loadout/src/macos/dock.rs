@@ -1,4 +1,4 @@
-//! The Dock icon's image while Loadout shows in the Dock (Settings → Interface → App icon).
+//! The Dock icon's image while Loadout shows in the Dock (Settings → General → App icon).
 //! The bundle's AppIcon.icns still decides the Finder and notification icon.
 
 use objc2::{AnyThread, MainThreadMarker};
